@@ -59,8 +59,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             f"script-src 'self' https://cdn.plot.ly https://accounts.google.com 'unsafe-eval' 'nonce-{nonce}'",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "img-src 'self' data: https://*.googleusercontent.com",
-            "frame-ancestors 'self' https://classroom.google.com https://accounts.google.com",
-            "frame-ancestors 'self' https://classroom.google.com https://accounts.google.com https://enopieastcobb.com",
+            "frame-ancestors 'self' https://classroom.google.com https://accounts.google.com https://enopieastcobb.com https://classroom.enopieastcobb.com",
             "frame-src https://accounts.google.com",
             "object-src 'none'"
         ]
