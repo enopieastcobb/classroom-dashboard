@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h1 style="font-size:16px; margin:0 0 4px;">Choose a class</h1>
+    <p style="font-size:13px; color:#6b7280; margin:0 0 16px;">Signed in as {{ teacher_email }}</p>
+
+    {% if courses %}
+    <div style="display:flex; flex-direction:column; gap:8px;">
+        {% for course in courses %}
+        <form method="POST" action="/dashboard">
+            <input type="hidden" name="credential" value="{{ idToken }}">
+            <input type="hidden" name="courseId" value="{{ course.id }}">
+            <button type="submit" class="btn"
+                    style="width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center;">
+                <span>{{ course.name }}</span>
+                {% if course.section %}<span style="font-size:12px; color:#9ca3af;">{{ course.section }}</span>{% endif %}
+            </button>
+        </form>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="font-size:13px; color:#6b7280;">No active courses found for this account.</p>
+    {% endif %}
+</div>
+{% endblock %}

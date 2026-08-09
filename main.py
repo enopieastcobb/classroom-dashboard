@@ -16,6 +16,8 @@ import threading
 import os
 import secrets
 import logging
+from collections import defaultdict
+from datetime import date
 from typing import List, Dict, Any
 
 # Configure logging
@@ -120,20 +122,32 @@ def get_teacher_creds_remote_signing(teacher_email: str, scopes: List[str]):
 class DataProcessor:
     """Pure logic for transforming API responses into flat records."""
     @staticmethod
+    def _format_due_date(meta: Dict[str, Any]) -> str | None:
+        due = meta.get('dueDate')
+        if not due or not all(k in due for k in ('year', 'month', 'day')):
+            return None
+        return f"{due['year']:04d}-{due['month']:02d}-{due['day']:02d}"
+
+    @staticmethod
     def process_submission_batch_item(response: Dict[str, Any], meta: Dict[str, Any], roster: Dict[str, str]) -> List[Dict[str, Any]]:
         submissions = response.get('studentSubmissions', [])
         records = []
+        due_str = DataProcessor._format_due_date(meta)
+        today_str = date.today().isoformat()
         for sub in submissions:
             score = sub.get('assignedGrade')
             max_pts = meta.get('maxPoints')
+            completed = sub.get('state') in ['TURNED_IN', 'GRADED']
             records.append({
                 "Student": roster.get(sub.get('userId'), "External Student"),
                 "Assignment": meta.get('title'),
-                "Completed": 1 if sub.get('state') in ['TURNED_IN', 'GRADED'] else 0,
+                "Completed": 1 if completed else 0,
                 "Status": sub.get('state', 'NEW'),
                 "Score": score,
                 "Max Points": max_pts,
-                "Grade %": (float(score) / max_pts * 100) if score is not None and max_pts else 0
+                "Grade %": (float(score) / max_pts * 100) if score is not None and max_pts else 0,
+                "Due": due_str,
+                "Overdue": bool(due_str and not completed and due_str < today_str),
             })
         return records
 
@@ -275,7 +289,7 @@ async def classroom_dashboard(request: Request):
         assignments = classroom_svc.get_coursework(course_id)
         
         if not assignments:
-            return templates.TemplateResponse("dashboard.html", {"request": request, "course_name": course_name, "chart_json": None, "chart_html": "<p>No assignments found for this class.</p>"})
+            return templates.TemplateResponse("dashboard.html", {"request": request, "course_name": course_name, "chart_json": None, "chart_html": "<p>No assignments found for this class.</p>", "roster": []})
 
         processed_records = classroom_svc.get_submissions_batch(course_id, assignments, student_roster)
 
@@ -286,7 +300,7 @@ async def classroom_dashboard(request: Request):
             # Create a Heatmap for a "Single View" of the entire class
             # Pivot data: Rows = Students, Columns = Assignments, Values = Completion Status
             pivot_df = df.pivot(index="Student", columns="Assignment", values="Completed")
-            
+
             fig = px.imshow(
                 pivot_df,
                 labels=dict(x="Assignments", y="Students", color="Status (1=Done)"),
@@ -295,12 +309,27 @@ async def classroom_dashboard(request: Request):
                 color_continuous_scale=[[0, 'white'], [1, '#2ecc71']], # Green for completed
                 title=f"Class Progress Overview: {course_name}"
             )
-            
+
             fig.update_layout(height=600, margin=dict(l=150))
             fig.update_xaxes(side="top")
             chart_json = fig.to_json()
+
+            # Group into a per-student roster for the detailed, expandable card view
+            student_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for record in processed_records:
+                student_map[record["Student"]].append(record)
+            roster = [
+                {
+                    "name": name,
+                    "completed": sum(1 for a in items if a["Completed"]),
+                    "total": len(items),
+                    "assignments": items,
+                }
+                for name, items in sorted(student_map.items())
+            ]
         else:
             chart_json = None
+            roster = []
 
     except Exception as e:
         logger.error(f"Failed to load classroom dashboard for course {course_id}: {e}", exc_info=True)
@@ -314,10 +343,11 @@ async def classroom_dashboard(request: Request):
             <small>The system is currently syncing with Google Classroom. Please refresh in a moment.</small>
         </div>
         """
-        return templates.TemplateResponse("dashboard.html", {"request": request, "chart_html": chart_html, "chart_json": None})
-    
+        return templates.TemplateResponse("dashboard.html", {"request": request, "chart_html": chart_html, "chart_json": None, "roster": []})
+
     return templates.TemplateResponse("dashboard.html", {
-        "request": request, 
+        "request": request,
         "course_name": course_name,
-        "chart_json": chart_json
+        "chart_json": chart_json,
+        "roster": roster
     })
