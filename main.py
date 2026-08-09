@@ -225,8 +225,7 @@ async def launch_entry(request: Request, courseId: str = None, addOnToken: str =
     The entry point from Google Classroom. 
     Teachers link to: https://your-app.com/launch?courseId=ID&addOnToken=TOKEN
     """
-    return templates.TemplateResponse("login.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "login.html", {
         "courseId": courseId,
         "google_client_id": GOOGLE_CLIENT_ID,
         "addOnToken": addOnToken
@@ -275,11 +274,10 @@ async def classroom_dashboard(request: Request):
         # Handle scenario where courseId isn't provided (fallback to picker)
         if not course_id:
             courses = classroom_svc.list_teacher_courses()
-            return templates.TemplateResponse("course_picker.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "course_picker.html", {
                 "teacher_email": teacher_email,
                 "courses": courses,
-                "idToken": id_token 
+                "idToken": id_token
             })
 
         course_details = classroom_svc.get_course_details(course_id)
@@ -289,7 +287,7 @@ async def classroom_dashboard(request: Request):
         assignments = classroom_svc.get_coursework(course_id)
         
         if not assignments:
-            return templates.TemplateResponse("dashboard.html", {"request": request, "course_name": course_name, "chart_json": None, "chart_html": "<p>No assignments found for this class.</p>", "roster": []})
+            return templates.TemplateResponse(request, "dashboard.html", {"course_name": course_name, "chart_json": None, "chart_html": "<p>No assignments found for this class.</p>", "roster": []})
 
         processed_records = classroom_svc.get_submissions_batch(course_id, assignments, student_roster)
 
@@ -343,10 +341,9 @@ async def classroom_dashboard(request: Request):
             <small>The system is currently syncing with Google Classroom. Please refresh in a moment.</small>
         </div>
         """
-        return templates.TemplateResponse("dashboard.html", {"request": request, "chart_html": chart_html, "chart_json": None, "roster": []})
+        return templates.TemplateResponse(request, "dashboard.html", {"chart_html": chart_html, "chart_json": None, "roster": []})
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "dashboard.html", {
         "course_name": course_name,
         "chart_json": chart_json,
         "roster": roster
