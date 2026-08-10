@@ -182,9 +182,12 @@ class ScheduleService:
         if day not in self.DAYS:
             raise ValueError(f"Unknown day '{day}'. Expected one of {self.DAYS}.")
 
+        # includeGridData is required for cell-level data (values, borders);
+        # without it `get` returns only spreadsheet/sheet metadata.
         result = self.service.spreadsheets().get(
             spreadsheetId=self.spreadsheet_id,
             ranges=[f"{day}!A1:Z100"],
+            includeGridData=True,
             fields=self._FIELDS,
         ).execute()
 

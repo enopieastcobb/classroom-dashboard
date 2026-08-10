@@ -585,5 +585,9 @@ async def classroom_dashboard(request: Request):
 
     except Exception as e:
         logger.error(f"Failed to load dashboard: {e}", exc_info=True)
-        ctx["error"] = "Could not load this session right now. Please try again in a moment."
+        # This page is reachable only by the three IAP-authorized staff
+        # accounts, so showing the real error beats a generic message that
+        # forces a log dig on every failure.
+        ctx["error"] = "Could not load this session right now."
+        ctx["error_detail"] = f"{type(e).__name__}: {escape(str(e))}"
         return templates.TemplateResponse(request, "session_dashboard.html", ctx)

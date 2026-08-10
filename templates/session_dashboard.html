@@ -87,7 +87,13 @@
 
 {% block content %}
 {% if error %}
-<div class="card"><p style="color:#d93025; margin:0;">{{ error }}</p></div>
+<div class="card">
+  <p style="color:#d93025; margin:0;">{{ error }}</p>
+  {% if error_detail %}
+  <pre style="margin:10px 0 0; padding:10px; background:#fdf2f2; border-radius:6px;
+              font-size:11px; color:#8a2020; white-space:pre-wrap; overflow-x:auto;">{{ error_detail }}</pre>
+  {% endif %}
+</div>
 {% endif %}
 
 <form method="POST" action="/dashboard" id="pickerForm" class="toolbar">
