@@ -98,13 +98,13 @@
 
 <form method="POST" action="/dashboard" id="pickerForm" class="toolbar">
   <input type="hidden" name="credential" value="{{ idToken }}">
-  <select name="day" class="pill" onchange="this.form.submit()">
+  <select name="day" class="pill" data-autosubmit>
     {% for d in days %}<option value="{{ d }}" {% if d == day %}selected{% endif %}>{{ d }}</option>{% endfor %}
   </select>
-  <select name="subject" class="pill" onchange="this.form.submit()">
+  <select name="subject" class="pill" data-autosubmit>
     {% for s in subjects %}<option value="{{ s }}" {% if s == subject %}selected{% endif %}>{{ room_label.get(s, s) }}</option>{% endfor %}
   </select>
-  <select name="time" class="pill" onchange="this.form.submit()">
+  <select name="time" class="pill" data-autosubmit>
     {% for t in times %}<option value="{{ t }}" {% if t == time %}selected{% endif %}>{{ t }}</option>{% endfor %}
   </select>
 </form>
@@ -239,6 +239,14 @@
 
 {% block scripts %}
 <script nonce="{{ nonce }}">
+  // Wired here rather than as an inline onchange="" attribute: the app's CSP
+  // has no 'unsafe-inline' in script-src, and a nonce whitelists <script>
+  // elements only -- it does not permit inline on* handlers, so an inline
+  // handler is silently blocked and the dropdown never submits.
+  document.querySelectorAll('[data-autosubmit]').forEach((sel) => {
+    sel.addEventListener('change', () => sel.form.submit());
+  });
+
   document.querySelectorAll('[data-open]').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.getElementById(btn.dataset.open).classList.add('open');

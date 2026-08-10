@@ -156,7 +156,11 @@ class DataProcessor:
     # The tag stays in the title forever so FIC history is preserved, so it only
     # counts as an ACTIVE fic while the work still sits in Classwork/Homework.
     FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
-    FIC_DATE_RE = re.compile(r'fic\s+([A-Za-z]{3}\s?\d{1,2})', re.IGNORECASE)
+    # Matched by real month name rather than any 3 letters, so noise words
+    # survive: "... fic inc Jul18" must still yield Jul 18.
+    FIC_DATE_RE = re.compile(
+        r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*(\d{1,2})\b',
+        re.IGNORECASE)
 
     # "To Be Graded" and "Graded" carry no subject in their name, so subject is
     # inferred from the assignment title instead (pull-classroom-data.mjs).
@@ -172,6 +176,9 @@ class DataProcessor:
     STRAND_MAP = [
         (re.compile(r'\broots?\b|root words', re.I), 'Roots', 'Roots'),
         (re.compile(r'\bdgp\b', re.I), 'DGP', 'DGP'),
+        (re.compile(r'problem of the day', re.I), 'Problem of the Day', 'POD'),
+        (re.compile(r'proof\s*reading|\bpr\b', re.I), 'Proof Reading', 'PR'),
+        (re.compile(r'\bwriting\b|\bessay\b|\bwrite\b', re.I), 'Writing', 'Writing'),
         (re.compile(r'classic series|\bcs\b', re.I), 'Classic Series', 'CS'),
         (re.compile(r'comprehension|\bcomp\b|critical reading', re.I), 'Comprehension', 'Comp'),
         (re.compile(r'grammar', re.I), 'Grammar', 'GR'),
@@ -274,11 +281,23 @@ class DataProcessor:
 
     @staticmethod
     def _fix_by(title: str) -> str:
-        """The fix-by date carried in a FIC title, e.g. '... . fic Jul1' -> 'Jul 7'."""
-        m = DataProcessor.FIC_DATE_RE.search(title or '')
+        """
+        The fix-by date carried in a FIC title: "... . fic Jul1" -> "Jul 1".
+
+        Real titles carry filler and repeats, so this looks only at the part
+        after "fic" and reports the LAST date found -- an item returned several
+        times reads "fic May10,May 30,31,Jun7", where the latest date is the
+        one that's actually still owed.
+        """
+        title = title or ''
+        m = DataProcessor.FIC_RE.search(title)
         if not m:
             return ''
-        return re.sub(r'([A-Za-z]{3})(\d)', r'\1 \2', m.group(1))
+        matches = DataProcessor.FIC_DATE_RE.findall(title[m.end():])
+        if not matches:
+            return ''
+        month, day = matches[-1]
+        return f"{month.title()} {int(day)}"
 
     @staticmethod
     def build_item(meta: Dict[str, Any], topic_by_id: Dict[str, str]) -> Dict[str, Any]:
