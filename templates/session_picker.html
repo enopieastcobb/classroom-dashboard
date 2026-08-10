@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h1 style="font-size:16px; margin:0 0 4px;">Choose a session</h1>
+    <p style="font-size:13px; color:#6b7280; margin:0 0 16px;">Signed in as {{ teacher_email }}</p>
+
+    {% if error %}
+    <p style="font-size:13px; color:#d93025;">{{ error }}</p>
+    {% elif sessions %}
+    {% set days = sessions | map(attribute='day') | unique | list %}
+    {% for day in days %}
+    <h2 style="font-size:13px; text-transform:uppercase; letter-spacing:0.04em; color:#6b7280; margin:16px 0 8px;">{{ day }}</h2>
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:8px;">
+        {% for s in sessions if s.day == day %}
+        <form method="POST" action="/session">
+            <input type="hidden" name="credential" value="{{ idToken }}">
+            <input type="hidden" name="session" value="{{ s.day }}|{{ s.teacher }}|{{ s.time }}">
+            <button type="submit" class="btn"
+                    style="width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center;">
+                <span>{{ s.teacher }}</span>
+                <span style="font-size:12px; color:#9ca3af;">{{ s.time }}</span>
+            </button>
+        </form>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="font-size:13px; color:#6b7280;">No sessions found in the weekly schedule.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}{{ day }} · {{ room_label.get(subject, subject) }} · {{ time }}{% endblock %}
+
+{% block head %}
+<style>
+  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 18px; }
+  .pill {
+    appearance:none; background:#111827; color:#fff; border:0; border-radius:10px;
+    padding:12px 34px 12px 16px; font-size:14px; font-weight:600; cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='white' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat; background-position:right 12px center;
+  }
+  .searchbar { display:flex; gap:10px; margin-bottom:16px; }
+  .searchbar input {
+    flex:1; border:1px solid #e5e7eb; background:#f9fafb; border-radius:10px;
+    padding:12px 14px; font-size:14px; outline:none;
+  }
+  .searchbar input:focus { background:#fff; border-color:#111827; }
+
+  .group { display:flex; gap:10px; margin-bottom:22px; align-items:stretch; }
+  .group-tab {
+    background:#111827; color:#fff; border-radius:10px; width:34px; flex:none;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .group-tab span { writing-mode:vertical-rl; transform:rotate(180deg); font-size:12px; font-weight:700; letter-spacing:.02em; }
+  .group-cards { flex:1; display:flex; flex-direction:column; gap:10px; }
+
+  .student {
+    display:flex; align-items:stretch; gap:12px; border:1px solid #e5e7eb;
+    border-radius:12px; padding:14px 0 14px 16px; background:#fff;
+  }
+  .student-name { width:170px; flex:none; }
+  .student-name .n { font-size:19px; font-weight:700; line-height:1.15; }
+  .badges { flex:1; display:flex; flex-wrap:wrap; gap:10px 12px; align-content:flex-start; padding:2px 8px; }
+  .view-col {
+    width:96px; flex:none; border-left:1px solid #e5e7eb; display:flex;
+    align-items:center; justify-content:center; text-align:center;
+  }
+  .view-btn { background:none; border:0; color:#374151; font-size:13px; cursor:pointer; line-height:1.3; }
+  .view-btn:hover { text-decoration:underline; }
+
+  .badge {
+    position:relative; display:inline-flex; align-items:center; justify-content:center;
+    border-radius:9px; padding:9px 12px; font-size:13px; font-weight:500; white-space:nowrap;
+  }
+  .badge.notdone { background:#fff; border:1.5px solid #111827; color:#111827; }
+  .badge.fic     { background:#ED5A52; border:1.5px solid #ED5A52; color:#fff; }
+  .badge.done    { background:#eef0f2; border:1.5px solid #eef0f2; color:#4b5563; }
+  .badge .cat {
+    position:absolute; left:-8px; top:-8px; width:18px; height:18px; border-radius:50%;
+    background:#111827; color:#fff; font-size:10px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  .overlay {
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.45);
+    align-items:flex-start; justify-content:center; padding:36px 16px; z-index:50;
+  }
+  .overlay.open { display:flex; }
+  .modal {
+    background:#fff; border-radius:16px; width:100%; max-width:860px;
+    max-height:86vh; overflow:auto; padding:18px 20px 24px;
+  }
+  .modal-head { display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+  .modal-title { font-size:18px; font-weight:700; }
+  .modal-sub { font-size:12px; color:#9ca3af; }
+  .subj-toggle { margin-left:auto; display:flex; gap:6px; }
+  .subj-toggle button {
+    border:1px solid #111827; background:#fff; color:#374151; border-radius:8px;
+    padding:7px 16px; font-size:13px; cursor:pointer;
+  }
+  .subj-toggle button.active { background:#111827; color:#fff; }
+  .close-x { background:none; border:0; font-size:20px; line-height:1; cursor:pointer; color:#6b7280; }
+
+  table.grid { border-collapse:collapse; width:100%; font-size:13px; }
+  table.grid th { text-align:left; font-weight:600; color:#374151; padding:8px 10px; white-space:nowrap; }
+  table.grid td { padding:8px 10px; text-align:center; border-bottom:1px solid #f3f4f6; }
+  table.grid td.date { text-align:left; color:#6b7280; white-space:nowrap; }
+  tr.month td { background:#111827; color:#fff; font-weight:700; text-align:left; padding:7px 10px; }
+  .empty-dot { color:#d1d5db; }
+  .cell-note { display:block; font-size:10px; color:#6b7280; margin-top:3px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="card"><p style="color:#d93025; margin:0;">{{ error }}</p></div>
+{% endif %}
+
+<form method="POST" action="/dashboard" id="pickerForm" class="toolbar">
+  <input type="hidden" name="credential" value="{{ idToken }}">
+  <select name="day" class="pill" onchange="this.form.submit()">
+    {% for d in days %}<option value="{{ d }}" {% if d == day %}selected{% endif %}>{{ d }}</option>{% endfor %}
+  </select>
+  <select name="subject" class="pill" onchange="this.form.submit()">
+    {% for s in subjects %}<option value="{{ s }}" {% if s == subject %}selected{% endif %}>{{ room_label.get(s, s) }}</option>{% endfor %}
+  </select>
+  <select name="time" class="pill" onchange="this.form.submit()">
+    {% for t in times %}<option value="{{ t }}" {% if t == time %}selected{% endif %}>{{ t }}</option>{% endfor %}
+  </select>
+</form>
+
+<div class="searchbar">
+  <input id="studentSearch" type="text" placeholder="Search this session…">
+</div>
+
+{% if unmatched %}
+<div class="card" style="border-color:#ED5A52; background:#fdf2f2; padding:12px 14px;">
+  <p style="font-size:13px; color:#8a2020; margin:0;">
+    No matching Google Classroom class found for: {{ unmatched | join(', ') }}
+  </p>
+</div>
+{% endif %}
+
+{% for g in groups %}
+<div class="group" data-group>
+  <div class="group-tab"><span>{{ g.teacher }}</span></div>
+  <div class="group-cards">
+    {% for s in g.students %}
+    <div class="student" data-name="{{ s.name | lower }}">
+      <div class="student-name"><div class="n">{{ s.name }}</div></div>
+      <div class="badges">
+        {% for i in s.todo %}
+        <span class="badge {{ i.status }}">
+          {% if i.category %}<span class="cat">{{ i.category }}</span>{% endif %}
+          {{ i.title }}
+        </span>
+        {% else %}
+        <span style="font-size:13px; color:#9ca3af; align-self:center;">Nothing outstanding.</span>
+        {% endfor %}
+      </div>
+      <div class="view-col">
+        <button type="button" class="view-btn" data-open="modal-{{ s.slug }}">View<br>Progress</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+{% if not error %}
+<div class="card"><p style="color:#6b7280; margin:0;">No students scheduled for this session.</p></div>
+{% endif %}
+{% endfor %}
+
+{% for g in groups %}{% for s in g.students %}
+<div class="overlay" id="modal-{{ s.slug }}" data-overlay>
+  <div class="modal">
+    <div class="modal-head">
+      <button type="button" class="close-x" data-close>&times;</button>
+      <div>
+        <div class="modal-title">{{ s.name }}</div>
+        <div class="modal-sub">progress</div>
+      </div>
+      <div class="subj-toggle">
+        <button type="button" class="active" data-subj="English" data-for="{{ s.slug }}">english</button>
+        <button type="button" data-subj="Math" data-for="{{ s.slug }}">maths</button>
+      </div>
+    </div>
+
+    {% for subj in ['English', 'Math'] %}
+    {% set gr = s.grids[subj] %}
+    <div data-panel="{{ s.slug }}-{{ subj }}" {% if subj != 'English' %}style="display:none"{% endif %}>
+      {% if gr.rows %}
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Date</th>
+            {% for st in gr.strands %}<th>{{ st.label }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% set ns = namespace(month='') %}
+          {% for row in gr.rows %}
+            {% if row.month != ns.month %}
+            {% set ns.month = row.month %}
+            <tr class="month"><td colspan="{{ gr.strands | length + 1 }}">{{ row.month }}</td></tr>
+            {% endif %}
+            <tr>
+              <td class="date">{{ row.date }}</td>
+              {% for cell in row.cells %}
+              <td>
+                {% if cell %}
+                <span class="badge {{ cell.status }}">{{ cell.title }}</span>
+                {% if cell.status == 'notdone' and cell.due_label %}
+                <span class="cell-note">{{ 'past due ' if cell.overdue else 'due ' }}{{ cell.due_label }}</span>
+                {% elif cell.was_fic %}
+                <span class="cell-note">fic ✓</span>
+                {% endif %}
+                {% else %}
+                <span class="empty-dot">·</span>
+                {% endif %}
+              </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p style="font-size:13px; color:#9ca3af; padding:24px 0; text-align:center;">No {{ subj }} work yet.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ nonce }}">
+  document.querySelectorAll('[data-open]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.getElementById(btn.dataset.open).classList.add('open');
+    });
+  });
+  document.querySelectorAll('[data-overlay]').forEach((ov) => {
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('open'); });
+    ov.querySelector('[data-close]').addEventListener('click', () => ov.classList.remove('open'));
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.querySelectorAll('[data-overlay].open').forEach((o) => o.classList.remove('open'));
+  });
+
+  document.querySelectorAll('[data-subj]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const slug = btn.dataset.for;
+      btn.parentElement.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      ['English', 'Math'].forEach((s) => {
+        const panel = document.querySelector(`[data-panel="${slug}-${s}"]`);
+        if (panel) panel.style.display = (s === btn.dataset.subj) ? '' : 'none';
+      });
+    });
+  });
+
+  document.getElementById('studentSearch').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('.student').forEach((card) => {
+      card.style.display = card.dataset.name.includes(q) ? '' : 'none';
+    });
+    document.querySelectorAll('[data-group]').forEach((g) => {
+      const anyVisible = [...g.querySelectorAll('.student')].some((c) => c.style.display !== 'none');
+      g.style.display = anyVisible ? '' : 'none';
+    });
+  });
+</script>
+{% endblock %}
