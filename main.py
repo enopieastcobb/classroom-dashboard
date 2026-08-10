@@ -304,7 +304,11 @@ class DataProcessor:
         return f"{month.title()} {int(day)}"
 
     @staticmethod
-    def build_item(meta: Dict[str, Any], topic_by_id: Dict[str, str]) -> Dict[str, Any]:
+    def build_item(
+        meta: Dict[str, Any],
+        topic_by_id: Dict[str, str],
+        sub: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         title = meta.get('title') or ''
         topic_name = topic_by_id.get(meta.get('topicId')) or ''
         subject, topic, category = DataProcessor._subject_and_topic(topic_name, title)
@@ -347,7 +351,14 @@ class DataProcessor:
             "given": re.sub(r'^given:\s*', '', meta.get('description') or '', flags=re.I),
             # Deep-link straight to the item in Classroom.
             "link": meta.get('alternateLink') or '',
+            # Score lives on the SUBMISSION, not the assignment -- the only
+            # place a graded item's marks can come from. Status still comes
+            # from the topic; this is display detail only.
+            "score": (sub or {}).get('assignedGrade'),
+            "draft_score": (sub or {}).get('draftGrade'),
             "max_points": meta.get('maxPoints'),
+            "late": bool((sub or {}).get('late')),
+            "submission_state": (sub or {}).get('state') or '',
         }
 
     # Strands kept off this screen entirely. "Problem of the Day" is tracked
@@ -405,17 +416,27 @@ class DataProcessor:
         return 3
 
     @staticmethod
+    def _section_rank(item: Dict[str, Any]) -> int:
+        """Classwork before Homework -- the order a session is actually worked."""
+        return {'C': 0, 'H': 1}.get(item.get("category"), 2)
+
+    @staticmethod
     def todo(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Outstanding work only, ordered FIC -> INC -> past due -> due later,
-        and within each tier by due date so the most urgent leads.
+        Outstanding work only: all Classwork first, then all Homework, and
+        within each section FIC -> INC -> past due -> due later, then by due
+        date so the most urgent leads its group.
 
-        This deliberately replaces progress.js todo(), which only had two
-        tiers and put not-started work ahead of FICs.
+        This deliberately replaces progress.js todo(), which had only two
+        tiers, ignored the section, and put not-started work ahead of FICs.
         """
         return sorted(
             (i for i in items if i["status"] in ('fic', 'notdone')),
-            key=lambda i: (DataProcessor.priority(i), i["due_key"]),
+            key=lambda i: (
+                DataProcessor._section_rank(i),
+                DataProcessor.priority(i),
+                i["due_key"],
+            ),
         )
 
     @staticmethod
@@ -431,8 +452,12 @@ class DataProcessor:
         by_date: Dict[str, Dict[str, Any]] = {}
         for i in items:
             key = i["posted_key"]
-            slot = by_date.setdefault(key, {"cells": {}, "label": i["posted_label"], "month": i["month_label"]})
-            slot["cells"][i["strand_code"]] = i
+            slot = by_date.setdefault(
+                key, {"cells": {}, "label": i["posted_label"], "month": i["month_label"]})
+            # A list, not a single item: two assignments can share the same
+            # date AND strand (e.g. Classwork and Homework the same session),
+            # and assigning would silently drop one from the history.
+            slot["cells"].setdefault(i["strand_code"], []).append(i)
 
         rows = []
         for key in sorted(by_date, reverse=True):
@@ -440,7 +465,7 @@ class DataProcessor:
             rows.append({
                 "date": slot["label"],
                 "month": slot["month"],
-                "cells": [slot["cells"].get(s["code"]) for s in strands],
+                "cells": [slot["cells"].get(s["code"], []) for s in strands],
             })
         return {"strands": strands, "rows": rows}
 
@@ -518,19 +543,47 @@ class ClassroomService:
         )
         return {t['topicId']: t.get('name', '') for t in topics}
 
+    def get_submissions_by_coursework(self, course_id: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Every submission in the course, keyed by courseWorkId.
+
+        courseWorkId='-' is the API's wildcard for "all coursework", so this
+        is one paged call for the whole course rather than one per assignment.
+        Each course is a single student's container, so the first submission
+        per assignment is that student's.
+        """
+        subs = self._all_pages(
+            self.service.courses().courseWork().studentSubmissions(),
+            'studentSubmissions',
+            courseId=course_id, courseWorkId='-',
+        )
+        by_cw: Dict[str, Dict[str, Any]] = {}
+        for s in subs:
+            by_cw.setdefault(s.get('courseWorkId'), s)
+        return by_cw
+
     def load_student(self, course_id: str) -> List[Dict[str, Any]]:
         """
         All assignment items for one student's Classroom course.
 
-        No studentSubmissions call: status comes from which topic the work sits
-        in, not from submission state, so coursework + topics is all that's
-        needed (two calls per student rather than one per assignment).
+        Three calls per student: coursework, topics, and all submissions.
+        Status comes from the topic the work sits in, but the SCORE only
+        exists on the submission, so graded items need it to show their marks.
         """
         assignments = self.get_coursework(course_id)
         if not assignments:
             return []
         topic_by_id = self.get_topics(course_id)
-        items = [DataProcessor.build_item(a, topic_by_id) for a in assignments]
+        try:
+            subs_by_cw = self.get_submissions_by_coursework(course_id)
+        except Exception as e:
+            # Scores are enrichment -- losing them must not lose the items.
+            logger.warning(f"Course {course_id}: could not load submissions ({e}); scores omitted.")
+            subs_by_cw = {}
+        items = [
+            DataProcessor.build_item(a, topic_by_id, subs_by_cw.get(a.get('id')))
+            for a in assignments
+        ]
 
         kept = [i for i in items if DataProcessor.is_trackable(i)]
         if len(kept) != len(items):

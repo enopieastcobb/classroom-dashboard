@@ -213,12 +213,30 @@
               {% for cell in row.cells %}
               <td>
                 {% if cell %}
-                <span class="badge {{ cell.status }}">{{ cell.title }}</span>
-                {% if cell.status == 'notdone' and cell.due_label %}
-                <span class="cell-note">{{ 'past due ' if cell.overdue else 'due ' }}{{ cell.due_label }}</span>
-                {% elif cell.was_fic %}
-                <span class="cell-note">fic ✓</span>
-                {% endif %}
+                  {% for it in cell %}
+                  <div style="margin:2px 0;">
+                    {% if it.link %}
+                    <a class="badge {{ it.status }}" href="{{ it.link }}" target="_blank"
+                       rel="noopener noreferrer" title="{{ it.given or it.material or it.title }}">{{ it.title }}</a>
+                    {% else %}
+                    <span class="badge {{ it.status }}"
+                          title="{{ it.given or it.material or it.title }}">{{ it.title }}</span>
+                    {% endif %}
+                    {% if it.score is not none %}
+                    <span class="cell-note"><strong>{{ it.score }}{% if it.max_points %}/{{ it.max_points }}{% endif %}</strong></span>
+                    {% elif it.draft_score is not none %}
+                    <span class="cell-note">{{ it.draft_score }}{% if it.max_points %}/{{ it.max_points }}{% endif %} (draft)</span>
+                    {% endif %}
+                    {% if it.status == 'notdone' and it.due_label %}
+                    <span class="cell-note">{{ 'past due ' if it.overdue else 'due ' }}{{ it.due_label }}</span>
+                    {% elif it.status == 'fic' and it.fix_by %}
+                    <span class="cell-note">fix {{ it.fix_by }}</span>
+                    {% elif it.was_fic %}
+                    <span class="cell-note">fic ✓</span>
+                    {% endif %}
+                    {% if it.late %}<span class="cell-note">late</span>{% endif %}
+                  </div>
+                  {% endfor %}
                 {% else %}
                 <span class="empty-dot">·</span>
                 {% endif %}
