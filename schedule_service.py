@@ -18,13 +18,46 @@ logger = logging.getLogger(__name__)
 
 SUBJECTS = {"math", "english", "weenopi"}
 
-# Rightmost columns carry ad-hoc make-up/absentee notes, not part of the regular
-# recurring weekly grid -- these are identified by not having a time value in
-# row 1, so they're already excluded by construction (see time_by_col below).
+# The right-hand columns hold one-off make-ups as their own little table:
+# Make-up Date | Student Name | Make-up time | Subject.
+# They sit at different column letters per tab (the grids are different widths),
+# so they're located by HEADER TEXT rather than position. They never leak into
+# the main grid because their row-1 headers aren't times, so time_by_col skips
+# them.
+MAKEUP_HEADERS = {
+    'make-up date': 'date',
+    'student name': 'student_name',
+    'make-up time': 'time',
+    'subject': 'subject',
+}
+
+
+SHEETS_EPOCH = datetime.date(1899, 12, 30)
 
 
 def _is_blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and value.strip() == "")
+
+
+def _coerce_date(value: Any) -> Optional[datetime.date]:
+    """
+    A make-up date as a real date, or None when the cell isn't one.
+
+    Handles every form the cell arrives in: a datetime/date (openpyxl), a
+    Sheets serial number, and free text like "August" -- which is NOT a date,
+    so it returns None and the caller surfaces the row as date-unspecified
+    rather than dropping it.
+    """
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            return SHEETS_EPOCH + datetime.timedelta(days=int(value))
+        except (ValueError, OverflowError):
+            return None
+    return None
 
 
 def _normalize_teacher(raw: str) -> str:
@@ -159,6 +192,76 @@ def parse_day_grid(
     return entries, warnings
 
 
+def parse_makeups(grid: List[List[Any]]) -> "tuple[List[Dict[str, Any]], List[str]]":
+    """
+    Reads the make-up table from a day tab's right-hand columns.
+
+    Returns (makeups, warnings). Each make-up is
+    {date, date_raw, student_name, time, subject}, where `date` is a real date
+    or None. Identical rows are de-duplicated -- the sheet currently repeats
+    one -- and a row missing a student name is reported rather than dropped
+    silently.
+    """
+    if not grid:
+        return [], []
+
+    header = grid[0]
+    col_of: Dict[str, int] = {}
+    for idx, value in enumerate(header):
+        key = str(value).strip().lower() if value is not None else ''
+        if key in MAKEUP_HEADERS:
+            col_of[MAKEUP_HEADERS[key]] = idx
+    if 'student_name' not in col_of:
+        return [], []
+
+    def cell(row, field):
+        idx = col_of.get(field)
+        if idx is None or idx >= len(row):
+            return None
+        return row[idx]
+
+    makeups: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    seen = set()
+    for r, row in enumerate(grid[1:], start=2):
+        raw_date = cell(row, 'date')
+        name = cell(row, 'student_name')
+        raw_time = cell(row, 'time')
+        subject = cell(row, 'subject')
+
+        if all(_is_blank(v) for v in (raw_date, name, raw_time, subject)):
+            continue
+        if _is_blank(name):
+            warnings.append(
+                f"Make-up row {r} has no student name "
+                f"(date={raw_date!r}, time={raw_time!r}, subject={subject!r}) -- skipped."
+            )
+            continue
+
+        parsed_date = _coerce_date(raw_date)
+        entry = {
+            "date": parsed_date,
+            "date_raw": '' if _is_blank(raw_date) else str(raw_date).strip(),
+            "student_name": str(name).strip(),
+            "time": _format_time(raw_time) or '',
+            "subject": str(subject).strip().title() if not _is_blank(subject) else '',
+        }
+        key = (entry["date"], entry["date_raw"], entry["student_name"],
+               entry["time"], entry["subject"])
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if parsed_date is None and not _is_blank(raw_date):
+            warnings.append(
+                f"Make-up row {r} ({entry['student_name']}): date {raw_date!r} isn't a "
+                f"real date, so it can't be matched to a session -- shown as undated."
+            )
+        makeups.append(entry)
+
+    return makeups, warnings
+
+
 class ScheduleService:
     """Reads the weekly schedule Sheet and exposes it as parsed session entries."""
 
@@ -185,7 +288,11 @@ class ScheduleService:
             logger.warning(f"static discovery unavailable for sheets v4 ({e}); fetching over network.")
             self.service = build('sheets', 'v4', credentials=credentials, cache_discovery=False)
 
-    def get_day_schedule(self, day: str) -> List[Dict[str, Any]]:
+    def get_day_schedule(self, day: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        One Sheets read gives both the recurring roster and the one-off
+        make-ups, returned as {"entries": [...], "makeups": [...]}.
+        """
         if day not in self.DAYS:
             raise ValueError(f"Unknown day '{day}'. Expected one of {self.DAYS}.")
 
@@ -224,9 +331,14 @@ class ScheduleService:
                 block_start_rows.add(ri - 1)
 
         entries, warnings = parse_day_grid(grid, block_start_rows)
-        for w in warnings:
+        makeups, makeup_warnings = parse_makeups(grid)
+        for w in warnings + makeup_warnings:
             logger.warning(f"[{day} schedule] {w}")
-        return entries
+        return {"entries": entries, "makeups": makeups}
+
+    def get_day_entries(self, day: str) -> List[Dict[str, Any]]:
+        """Just the recurring weekly roster, without the one-off make-ups."""
+        return self.get_day_schedule(day)["entries"]
 
     @staticmethod
     def _has_border(cell: Dict[str, Any], side: str) -> bool:
@@ -247,16 +359,19 @@ class ScheduleService:
         if 'stringValue' in uev:
             return uev['stringValue']
         if 'numberValue' in uev:
-            # Check both format views -- a time format applied to a whole row
-            # only shows up under effectiveFormat.
-            is_time = any(
-                cell.get(view, {}).get('numberFormat', {}).get('type') in ('TIME', 'DATE_TIME')
+            # Check both format views -- a format applied to a whole row or
+            # column only shows up under effectiveFormat.
+            kinds = {
+                cell.get(view, {}).get('numberFormat', {}).get('type')
                 for view in ('userEnteredFormat', 'effectiveFormat')
-            )
-            if is_time:
+            }
+            if 'TIME' in kinds or 'DATE_TIME' in kinds:
                 total_minutes = round(uev['numberValue'] * 24 * 60) % (24 * 60)
                 hours, minutes = divmod(total_minutes, 60)
                 return datetime.time(hours, minutes)
+            if 'DATE' in kinds:
+                # Sheets serial dates count from 1899-12-30.
+                return SHEETS_EPOCH + datetime.timedelta(days=int(uev['numberValue']))
             return uev['numberValue']
         # Fall back to what the sheet displays (e.g. "3:00:00 PM") so a time
         # header still parses even if the numeric/format pair is missing.

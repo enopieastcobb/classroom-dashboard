@@ -16,7 +16,7 @@ import os
 import re
 import secrets
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from schedule_service import ScheduleService
@@ -215,18 +215,34 @@ def get_schedule_service() -> ScheduleService:
     return ScheduleService(SCHEDULE_SPREADSHEET_ID, get_scoped_creds(SHEETS_SCOPES))
 
 
-def get_day_schedule_cached(day: str) -> List[Dict[str, Any]]:
+def get_day_schedule_cached(day: str) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Day schedule, cached briefly. Without this every dropdown change re-reads
-    the Sheet, and each read is a token mint plus a Sheets round trip.
+    Day roster plus its make-ups, from one Sheets read, cached briefly.
+    Without this every dropdown change re-reads the Sheet, and each read is a
+    token mint plus a Sheets round trip.
     """
     key = ('schedule', day)
     hit = _CACHE.get(key)
     if hit is not None:
         return hit
-    entries = get_schedule_service().get_day_schedule(day)
-    _CACHE.put(key, entries, _SCHEDULE_TTL)
-    return entries
+    data = get_schedule_service().get_day_schedule(day)
+    _CACHE.put(key, data, _SCHEDULE_TTL)
+    return data
+
+
+def resolve_session_date(day: str, today: Optional[date] = None) -> Optional[date]:
+    """
+    The actual calendar date of the selected weekday -- today if today is that
+    day, otherwise its next occurrence.
+
+    Make-ups are one-off and dated, while this screen is a recurring weekly
+    view, so a date is needed to tell one Tuesday's make-ups from another's.
+    """
+    weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    if day not in weekdays:
+        return None
+    today = today or date.today()
+    return today + timedelta(days=(weekdays.index(day) - today.weekday()) % 7)
 
 class DataProcessor:
     """
@@ -775,6 +791,8 @@ ROOM_LABEL = {"English": "English Room", "Math": "Maths Room", "Weenopi": "Weeno
 
 # Walk-ins aren't on any teacher's scheduled list, so they get their own group.
 WALKIN_GROUP = "Walk-ins"
+# Make-ups come from the schedule Sheet's own dated make-up table.
+MAKEUP_GROUP = "Make-ups"
 
 
 def _time_key(t: str) -> tuple:
@@ -834,7 +852,9 @@ async def classroom_dashboard(request: Request):
         if sel_day not in ScheduleService.DAYS:
             today = date.today().strftime('%A')
             sel_day = today if today in ScheduleService.DAYS else ScheduleService.DAYS[0]
-        entries = get_day_schedule_cached(sel_day)
+        schedule_data = get_day_schedule_cached(sel_day)
+        entries = schedule_data["entries"]
+        all_makeups = schedule_data["makeups"]
         t = _mark('read_schedule', t)
 
         subjects = sorted({e["subject"] for e in entries})
@@ -883,11 +903,29 @@ async def classroom_dashboard(request: Request):
         # no matter what their Classroom lookup does -- a teacher must never
         # have to wonder whether the list is complete. Walk-ins are appended.
         scheduled_names = {n for names in by_teacher.values() for n in names}
+
+        # Make-ups for THIS occurrence of the selected day, in this room and
+        # slot. A dated make-up on another Tuesday must not appear on this one.
+        # A row whose date isn't a real date can't be placed, so it still shows
+        # here (marked undated) rather than being lost.
+        session_date = resolve_session_date(sel_day)
+        makeups = [
+            m for m in all_makeups
+            if m["subject"] == sel_subject
+            and m["time"] == sel_time
+            and (m["date"] == session_date or m["date"] is None)
+        ]
+
         slate = [(teacher, n, False)
                  for teacher in sorted(by_teacher)
                  for n in by_teacher[teacher]]
         slate += [(WALKIN_GROUP, n, True)
                   for n in walkins if n not in scheduled_names]
+        slate += [(MAKEUP_GROUP, m["student_name"], False) for m in makeups]
+        makeup_note = {
+            m["student_name"]: ('' if m["date"] else f"date not specified ({m['date_raw']})")
+            for m in makeups
+        }
 
         def load_one(entry):
             teacher, name, is_walkin = entry
@@ -895,6 +933,8 @@ async def classroom_dashboard(request: Request):
                 "teacher": teacher,
                 "name": name,
                 "walkin": is_walkin,
+                "makeup": teacher == MAKEUP_GROUP,
+                "makeup_note": makeup_note.get(name, '') if teacher == MAKEUP_GROUP else '',
                 "slug": re.sub(r'[^a-z0-9]+', '-', f"{teacher}-{name}".lower()).strip('-'),
                 "grade": "", "todo": [], "counts": DataProcessor.counts([]),
                 "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
@@ -935,14 +975,15 @@ async def classroom_dashboard(request: Request):
         t = _mark('load_students', t)
 
         groups = []
-        for teacher in sorted(by_teacher) + [WALKIN_GROUP]:
+        for teacher in sorted(by_teacher) + [WALKIN_GROUP, MAKEUP_GROUP]:
             in_group = [c for c in cards if c["teacher"] == teacher]
             if in_group:
                 groups.append({"teacher": teacher, "students": in_group})
 
         summary = {
-            "scheduled": sum(1 for c in cards if not c["walkin"]),
+            "scheduled": sum(1 for c in cards if not c["walkin"] and not c["makeup"]),
             "walkins": sum(1 for c in cards if c["walkin"]),
+            "makeups": sum(1 for c in cards if c["makeup"]),
             "loaded": sum(1 for c in cards if c["state"] == "ok"),
             "unmatched": sum(1 for c in cards if c["state"] == "unmatched"),
             "errors": sum(1 for c in cards if c["state"] == "error"),
@@ -955,6 +996,7 @@ async def classroom_dashboard(request: Request):
             "summary": summary,
             "timings": timings,
             "all_students": all_students,
+            "session_date": session_date.strftime('%a %b %-d') if session_date else '',
             "unmatched": [c["name"] for c in cards if c["state"] == "unmatched"],
         })
         return templates.TemplateResponse(request, "session_dashboard.html", ctx)

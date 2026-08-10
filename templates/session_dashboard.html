@@ -38,6 +38,12 @@
     font-size:10px; font-weight:600; color:#8a6d2b; background:#ecdcb0;
     border-radius:4px; padding:2px 6px;
   }
+  /* Make-ups get their own tint so they don't read as walk-ins. */
+  .student.is-makeup { background:#eaf1f7; border-color:#c7d9e8; }
+  .makeup-tag {
+    font-size:10px; font-weight:600; color:#2f5d80; background:#c7d9e8;
+    border-radius:4px; padding:2px 6px;
+  }
   .badges { flex:1; display:flex; flex-wrap:wrap; gap:10px 12px; align-content:flex-start; padding:2px 8px; }
   .view-col {
     width:96px; flex:none; border-left:1px solid #e5e7eb; display:flex;
@@ -136,9 +142,11 @@
 
 {% if summary and summary.scheduled %}
 <p style="font-size:12px; margin:0 0 12px; color:{{ '#8a2020' if (summary.unmatched or summary.errors) else '#6b7280' }};">
+  {%- if session_date %}{{ session_date }} · {% endif %}
   {{ summary.scheduled }} scheduled this session ·
   {{ summary.loaded }} loaded
   {%- if summary.walkins %} · {{ summary.walkins }} walk-in{{ 's' if summary.walkins != 1 }}{% endif %}
+  {%- if summary.makeups %} · {{ summary.makeups }} make-up{{ 's' if summary.makeups != 1 }}{% endif %}
   {%- if summary.unmatched %} · {{ summary.unmatched }} with no matching Classroom class{% endif %}
   {%- if summary.errors %} · {{ summary.errors }} failed to load{% endif %}
 </p>
@@ -149,10 +157,19 @@
   <div class="group-tab"><span>{{ g.teacher }}</span></div>
   <div class="group-cards">
     {% for s in g.students %}
-    <div class="student{% if s.walkin %} is-walkin{% endif %}" data-name="{{ s.name | lower }}">
+    <div class="student{% if s.walkin %} is-walkin{% elif s.makeup %} is-makeup{% endif %}"
+         data-name="{{ s.name | lower }}">
       <div class="student-name">
         <div class="n">{{ s.name }}</div>
         {% if s.grade %}<div class="g">{{ s.grade }}</div>{% endif %}
+        {% if s.makeup %}
+        <div style="margin-top:6px;">
+          <span class="makeup-tag">make-up</span>
+          {% if s.makeup_note %}
+          <div style="font-size:11px; color:#8a2020; margin-top:4px;">{{ s.makeup_note }}</div>
+          {% endif %}
+        </div>
+        {% endif %}
         {% if s.walkin %}
         <div style="margin-top:6px; display:flex; align-items:center; gap:6px;">
           <span class="walkin-tag">walk-in</span>
