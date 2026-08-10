@@ -32,6 +32,12 @@
   .student-name { width:170px; flex:none; }
   .student-name .n { font-size:19px; font-weight:700; line-height:1.15; }
   .student-name .g { font-size:13px; color:#9ca3af; margin-top:3px; }
+  /* Walk-ins are tinted so it's obvious at a glance who wasn't scheduled. */
+  .student.is-walkin { background:#f7efdd; border-color:#ecdcb0; }
+  .walkin-tag {
+    font-size:10px; font-weight:600; color:#8a6d2b; background:#ecdcb0;
+    border-radius:4px; padding:2px 6px;
+  }
   .badges { flex:1; display:flex; flex-wrap:wrap; gap:10px 12px; align-content:flex-start; padding:2px 8px; }
   .view-col {
     width:96px; flex:none; border-left:1px solid #e5e7eb; display:flex;
@@ -111,12 +117,28 @@
 
 <div class="searchbar">
   <input id="studentSearch" type="text" placeholder="Search this session…">
+
+  <form method="POST" action="/dashboard" style="display:flex; gap:8px;">
+    <input type="hidden" name="credential" value="{{ idToken }}">
+    <input type="hidden" name="day" value="{{ day }}">
+    <input type="hidden" name="subject" value="{{ subject }}">
+    <input type="hidden" name="time" value="{{ time }}">
+    <input type="hidden" name="walkins" value="{{ walkins_field }}">
+    <input name="add_walkin" list="allStudents" placeholder="Add a walk-in student…"
+           style="border:1px solid #e5e7eb; background:#f9fafb; border-radius:10px;
+                  padding:12px 14px; font-size:14px; outline:none; min-width:220px;">
+    <datalist id="allStudents">
+      {% for n in all_students %}<option value="{{ n }}"></option>{% endfor %}
+    </datalist>
+    <button type="submit" class="btn" style="white-space:nowrap;">+ Add Student</button>
+  </form>
 </div>
 
 {% if summary and summary.scheduled %}
 <p style="font-size:12px; margin:0 0 12px; color:{{ '#8a2020' if (summary.unmatched or summary.errors) else '#6b7280' }};">
   {{ summary.scheduled }} scheduled this session ·
   {{ summary.loaded }} loaded
+  {%- if summary.walkins %} · {{ summary.walkins }} walk-in{{ 's' if summary.walkins != 1 }}{% endif %}
   {%- if summary.unmatched %} · {{ summary.unmatched }} with no matching Classroom class{% endif %}
   {%- if summary.errors %} · {{ summary.errors }} failed to load{% endif %}
 </p>
@@ -127,10 +149,26 @@
   <div class="group-tab"><span>{{ g.teacher }}</span></div>
   <div class="group-cards">
     {% for s in g.students %}
-    <div class="student" data-name="{{ s.name | lower }}">
+    <div class="student{% if s.walkin %} is-walkin{% endif %}" data-name="{{ s.name | lower }}">
       <div class="student-name">
         <div class="n">{{ s.name }}</div>
         {% if s.grade %}<div class="g">{{ s.grade }}</div>{% endif %}
+        {% if s.walkin %}
+        <div style="margin-top:6px; display:flex; align-items:center; gap:6px;">
+          <span class="walkin-tag">walk-in</span>
+          <form method="POST" action="/dashboard" style="display:inline;">
+            <input type="hidden" name="credential" value="{{ idToken }}">
+            <input type="hidden" name="day" value="{{ day }}">
+            <input type="hidden" name="subject" value="{{ subject }}">
+            <input type="hidden" name="time" value="{{ time }}">
+            <input type="hidden" name="walkins" value="{{ walkins_field }}">
+            <input type="hidden" name="remove_walkin" value="{{ s.name }}">
+            <button type="submit" title="Remove walk-in"
+                    style="background:none; border:0; color:#b8923c; cursor:pointer;
+                           font-size:14px; padding:0; line-height:1;">&times;</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
       <div class="badges">
         {% for i in s.todo %}

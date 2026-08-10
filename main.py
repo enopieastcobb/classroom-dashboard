@@ -773,6 +773,9 @@ def _verify_and_get_email(id_token: str) -> str:
 
 ROOM_LABEL = {"English": "English Room", "Math": "Maths Room", "Weenopi": "Weenopi"}
 
+# Walk-ins aren't on any teacher's scheduled list, so they get their own group.
+WALKIN_GROUP = "Walk-ins"
+
 
 def _time_key(t: str) -> tuple:
     """Sort '9:00 AM' before '12:00 PM' before '3:00 PM'."""
@@ -795,11 +798,24 @@ async def classroom_dashboard(request: Request):
     sel_subject = form_data.get("subject") or ""
     sel_time = form_data.get("time") or ""
 
+    # Walk-ins ride along in one pipe-delimited field. They deliberately do NOT
+    # survive a change of day/room/time -- that form omits them, so switching
+    # session clears the group, matching the prototype's resetGroup().
+    walkins = [n.strip() for n in (form_data.get("walkins") or "").split("|") if n.strip()]
+    adding = (form_data.get("add_walkin") or "").strip()
+    removing = (form_data.get("remove_walkin") or "").strip()
+    if adding and adding not in walkins:
+        walkins.append(adding)
+    if removing:
+        walkins = [n for n in walkins if n != removing]
+
     ctx: Dict[str, Any] = {
         "idToken": id_token, "days": ScheduleService.DAYS,
         "subjects": [], "times": [], "groups": [], "unmatched": [],
         "day": sel_day, "subject": sel_subject, "time": sel_time,
         "room_label": ROOM_LABEL,
+        "walkins": walkins, "walkins_field": "|".join(walkins),
+        "all_students": [],
     }
 
     timings: Dict[str, float] = {}
@@ -854,17 +870,31 @@ async def classroom_dashboard(request: Request):
         t = _mark('list_courses', t)
         logger.info(f"{sel_day} {sel_subject} {sel_time}: {len(courses)} active courses visible.")
 
+        # Every student who has a Classroom class, for the walk-in picker --
+        # a walk-in may be any student in the centre, not just one on today's
+        # schedule (students come late, swap, or do make-ups).
+        all_students = sorted({
+            split_course_name(c.get("name", "")).get("name", "")
+            for c in courses
+        } - {""})
+
         # The schedule is the source of truth for WHO should be on screen, so
         # the slate is built from it first. Every scheduled student gets a card
         # no matter what their Classroom lookup does -- a teacher must never
-        # have to wonder whether the list is complete.
-        slate = [(t, n) for t in sorted(by_teacher) for n in by_teacher[t]]
+        # have to wonder whether the list is complete. Walk-ins are appended.
+        scheduled_names = {n for names in by_teacher.values() for n in names}
+        slate = [(teacher, n, False)
+                 for teacher in sorted(by_teacher)
+                 for n in by_teacher[teacher]]
+        slate += [(WALKIN_GROUP, n, True)
+                  for n in walkins if n not in scheduled_names]
 
         def load_one(entry):
-            teacher, name = entry
+            teacher, name, is_walkin = entry
             card = {
                 "teacher": teacher,
                 "name": name,
+                "walkin": is_walkin,
                 "slug": re.sub(r'[^a-z0-9]+', '-', f"{teacher}-{name}".lower()).strip('-'),
                 "grade": "", "todo": [], "counts": DataProcessor.counts([]),
                 "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
@@ -905,13 +935,14 @@ async def classroom_dashboard(request: Request):
         t = _mark('load_students', t)
 
         groups = []
-        for teacher in sorted(by_teacher):
+        for teacher in sorted(by_teacher) + [WALKIN_GROUP]:
             in_group = [c for c in cards if c["teacher"] == teacher]
             if in_group:
                 groups.append({"teacher": teacher, "students": in_group})
 
         summary = {
-            "scheduled": len(cards),
+            "scheduled": sum(1 for c in cards if not c["walkin"]),
+            "walkins": sum(1 for c in cards if c["walkin"]),
             "loaded": sum(1 for c in cards if c["state"] == "ok"),
             "unmatched": sum(1 for c in cards if c["state"] == "unmatched"),
             "errors": sum(1 for c in cards if c["state"] == "error"),
@@ -923,6 +954,7 @@ async def classroom_dashboard(request: Request):
             "groups": groups,
             "summary": summary,
             "timings": timings,
+            "all_students": all_students,
             "unmatched": [c["name"] for c in cards if c["state"] == "unmatched"],
         })
         return templates.TemplateResponse(request, "session_dashboard.html", ctx)
