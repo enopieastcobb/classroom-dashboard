@@ -157,8 +157,9 @@ class ClassroomService:
         self.scopes = [
             'https://www.googleapis.com/auth/classroom.courses.readonly',
             'https://www.googleapis.com/auth/classroom.rosters.readonly',
-            'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
-            'https://www.googleapis.com/auth/classroom.coursework.students.readonly'
+            'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
+            'https://www.googleapis.com/auth/classroom.student-submissions.students.readonly',
+            'https://www.googleapis.com/auth/classroom.topics.readonly',
         ]
         
         if not teacher_email:
