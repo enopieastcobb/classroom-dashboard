@@ -389,17 +389,38 @@ class ClassroomService:
             logger.error(f"Failed to build Classroom service (likely identity/Gaia issue): {e}")
             raise
 
+    @staticmethod
+    def _all_pages(collection, key: str, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Drains every page of a Classroom list call.
+
+        The API caps page size on its own when none is given, so a single
+        .execute() silently returns a PARTIAL list -- which would drop
+        students off the end of the course list and truncate a student's
+        assignment history.
+        """
+        out: List[Dict[str, Any]] = []
+        request = collection.list(pageSize=200, **kwargs)
+        while request is not None:
+            response = request.execute()
+            out.extend(response.get(key, []))
+            request = collection.list_next(request, response)
+        return out
+
     def get_course_details(self, course_id: str):
         return self.service.courses().get(id=course_id).execute()
 
     def list_teacher_courses(self) -> List[Dict[str, Any]]:
         """Lists all active courses where the user is a teacher."""
-        response = self.service.courses().list(teacherId='me', courseStates=['ACTIVE']).execute()
-        return response.get('courses', [])
+        return self._all_pages(
+            self.service.courses(), 'courses',
+            teacherId='me', courseStates=['ACTIVE'],
+        )
 
     def get_student_roster(self, course_id: str) -> Dict[str, str]:
-        roster_response = self.service.courses().students().list(courseId=course_id).execute()
-        students_list = roster_response.get('students', [])
+        students_list = self._all_pages(
+            self.service.courses().students(), 'students', courseId=course_id,
+        )
         return {
             s.get('userId'): s.get('profile', {}).get('name', {}).get('fullName', 'Unknown Student')
             for s in students_list
@@ -407,14 +428,16 @@ class ClassroomService:
 
     def get_coursework(self, course_id: str) -> List[Dict[str, Any]]:
         # PUBLISHED only -- a draft hasn't been assigned to the student yet.
-        response = self.service.courses().courseWork().list(
-            courseId=course_id, courseWorkStates=['PUBLISHED']
-        ).execute()
-        return response.get('courseWork', [])
+        return self._all_pages(
+            self.service.courses().courseWork(), 'courseWork',
+            courseId=course_id, courseWorkStates=['PUBLISHED'],
+        )
 
     def get_topics(self, course_id: str) -> Dict[str, str]:
-        response = self.service.courses().topics().list(courseId=course_id).execute()
-        return {t['topicId']: t.get('name', '') for t in response.get('topic', [])}
+        topics = self._all_pages(
+            self.service.courses().topics(), 'topic', courseId=course_id,
+        )
+        return {t['topicId']: t.get('name', '') for t in topics}
 
     def load_student(self, course_id: str) -> List[Dict[str, Any]]:
         """
@@ -564,7 +587,18 @@ async def classroom_dashboard(request: Request):
                 if not course:
                     unmatched.append(name)
                     continue
-                items = classroom_svc.load_student(course["id"])
+                # One student's course failing must not blank the whole
+                # session -- show that student with a note instead.
+                try:
+                    items = classroom_svc.load_student(course["id"])
+                    load_error = ""
+                except Exception as student_err:
+                    logger.error(
+                        f"Failed to load Classroom data for '{name}' "
+                        f"(course {course.get('id')}): {student_err}", exc_info=True)
+                    items = []
+                    load_error = f"{type(student_err).__name__}: {student_err}"
+
                 subject_items = [i for i in items if i["subject"] == sel_subject]
                 students.append({
                     "name": name,
@@ -572,6 +606,7 @@ async def classroom_dashboard(request: Request):
                     "slug": re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-'),
                     "todo": DataProcessor.todo(subject_items),
                     "counts": DataProcessor.counts(subject_items),
+                    "load_error": load_error,
                     "grids": {
                         s: DataProcessor.grid([i for i in items if i["subject"] == s])
                         for s in ("English", "Math")
