@@ -81,6 +81,67 @@ def nonce_processor(request: Request):
 
 templates = Jinja2Templates(directory="templates", context_processors=[nonce_processor])
 
+class _TTLCache:
+    """
+    Tiny in-process cache. Cloud Run may run several instances, each keeping
+    its own copy -- fine here, since every entry is either derivable again or
+    short-lived.
+    """
+    def __init__(self):
+        self._data: Dict[Any, tuple] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key):
+        with self._lock:
+            hit = self._data.get(key)
+            if not hit:
+                return None
+            value, expires_at = hit
+            if time.time() >= expires_at:
+                self._data.pop(key, None)
+                return None
+            return value
+
+    def put(self, key, value, ttl_seconds: float):
+        with self._lock:
+            self._data[key] = (value, time.time() + ttl_seconds)
+
+
+_CACHE = _TTLCache()
+
+# NOTHING ABOUT AN ASSIGNMENT IS EVER CACHED. Coursework, topics and
+# submissions are fetched live on every request: a student can turn work in at
+# any moment and this screen must show that immediately. Only auth tokens and
+# slow-moving roster metadata are cached, with short windows.
+
+# Minted tokens live an hour; re-use for 50 minutes. Each mint costs a signJwt
+# call plus a token exchange, and there are two per request (Sheets +
+# Classroom) -- four sequential round trips before any real work begins.
+_TOKEN_TTL = 50 * 60
+# The schedule Sheet only changes when an admin reschedules someone, which is
+# infrequent, so this window can be generous -- it makes flipping the dropdowns
+# feel instant instead of re-reading the Sheet every time.
+_SCHEDULE_TTL = 5 * 60
+# Which Classroom classes exist -- changes when a student joins the centre.
+# Note this is the class LIST only, never its contents.
+_COURSES_TTL = 60
+
+
+def _build_service(name: str, version: str, credentials):
+    """
+    Builds an API client without fetching the discovery document over the
+    network. The Classroom discovery doc is around a megabyte, and fetching it
+    on every request was a large share of page latency; static_discovery uses
+    the copy shipped inside the client library instead.
+    """
+    try:
+        return build(name, version, credentials=credentials,
+                     cache_discovery=False, static_discovery=True)
+    except Exception as e:
+        logger.warning(f"static discovery unavailable for {name} {version} ({e}); fetching over network.")
+        return build(name, version, credentials=credentials, cache_discovery=False)
+
+
 def get_scoped_creds(scopes: List[str], subject: Optional[str] = None):
     """
     Mints an access token by having the IAM Credentials API sign a JWT --
@@ -98,6 +159,11 @@ def get_scoped_creds(scopes: List[str], subject: Optional[str] = None):
     """
     if not DEFAULT_CREDS:
         raise RuntimeError("Google Default Credentials not initialized.")
+
+    cache_key = ('token', subject or '', tuple(sorted(scopes)))
+    cached = _CACHE.get(cache_key)
+    if cached:
+        return oauth2_credentials.Credentials(cached)
 
     # Refresh default creds if expired
     if not DEFAULT_CREDS.valid:
@@ -132,6 +198,7 @@ def get_scoped_creds(scopes: List[str], subject: Optional[str] = None):
     resp.raise_for_status()
     access_token = resp.json()["access_token"]
 
+    _CACHE.put(cache_key, access_token, _TOKEN_TTL)
     return oauth2_credentials.Credentials(access_token)
 
 
@@ -146,6 +213,20 @@ SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 def get_schedule_service() -> ScheduleService:
     """Reads the weekly schedule Sheet as the service account it's shared with."""
     return ScheduleService(SCHEDULE_SPREADSHEET_ID, get_scoped_creds(SHEETS_SCOPES))
+
+
+def get_day_schedule_cached(day: str) -> List[Dict[str, Any]]:
+    """
+    Day schedule, cached briefly. Without this every dropdown change re-reads
+    the Sheet, and each read is a token mint plus a Sheets round trip.
+    """
+    key = ('schedule', day)
+    hit = _CACHE.get(key)
+    if hit is not None:
+        return hit
+    entries = get_schedule_service().get_day_schedule(day)
+    _CACHE.put(key, entries, _SCHEDULE_TTL)
+    return entries
 
 class DataProcessor:
     """
@@ -173,7 +254,7 @@ class DataProcessor:
         r'classic series|comprehension|selection', re.IGNORECASE)
     MATH_HINT = re.compile(
         r'logic|basic thinking|critical thinking|number sense|fraction|'
-        r'algebra|ratio|multiplication|division', re.IGNORECASE)
+        r'algebra|ratio|multiplication|division|extra practice', re.IGNORECASE)
 
     # Title -> curriculum strand. Order matters: the first match wins, so more
     # specific patterns come before the ones that would also match them.
@@ -192,6 +273,8 @@ class DataProcessor:
         (re.compile(r'critical thinking|\bct\b', re.I), 'Critical thinking', 'CT'),
         (re.compile(r'\blogic\b', re.I), 'Logic', 'Logic'),
         (re.compile(r'number sense|\bns\b', re.I), 'Number sense', 'NS'),
+        # Maths strand, per the centre's vocabulary.
+        (re.compile(r'extra practice|\bep\b', re.I), 'Extra practice', 'EP'),
         (re.compile(r'fraction', re.I), 'Fractions', 'Fr'),
         (re.compile(r'algebra', re.I), 'Algebra', 'Alg'),
         (re.compile(r'ratio', re.I), 'Ratios', 'Ratio'),
@@ -493,7 +576,7 @@ class ClassroomService:
         self._local = threading.local()
         try:
             # Classroom API discovery is cached internally by the library, but we disable file cache for Cloud Shell
-            self.service = build('classroom', 'v1', credentials=self.creds, cache_discovery=False)
+            self.service = _build_service('classroom', 'v1', self.creds)
         except Exception as e:
             logger.error(f"Failed to build Classroom service (likely identity/Gaia issue): {e}")
             raise
@@ -598,6 +681,9 @@ class ClassroomService:
         Three calls per student: coursework, topics, and all submissions.
         Status comes from the topic the work sits in, but the SCORE only
         exists on the submission, so graded items need it to show their marks.
+
+        Never cached. A student can turn work in at any moment and the screen
+        has to reflect it on the next load.
         """
         assignments = self.get_coursework(course_id)
         if not assignments:
@@ -716,15 +802,24 @@ async def classroom_dashboard(request: Request):
         "room_label": ROOM_LABEL,
     }
 
+    timings: Dict[str, float] = {}
+    t_request = time.perf_counter()
+
+    def _mark(label: str, since: float) -> float:
+        timings[label] = round(time.perf_counter() - since, 2)
+        return time.perf_counter()
+
     try:
+        t = time.perf_counter()
         teacher_email = _verify_and_get_email(id_token)
-        schedule_svc = get_schedule_service()
+        t = _mark('verify_token', t)
 
         # Default to today when it's a session day, else the first one.
         if sel_day not in ScheduleService.DAYS:
             today = date.today().strftime('%A')
             sel_day = today if today in ScheduleService.DAYS else ScheduleService.DAYS[0]
-        entries = schedule_svc.get_day_schedule(sel_day)
+        entries = get_day_schedule_cached(sel_day)
+        t = _mark('read_schedule', t)
 
         subjects = sorted({e["subject"] for e in entries})
         if sel_subject not in subjects:
@@ -747,7 +842,16 @@ async def classroom_dashboard(request: Request):
                     by_teacher[e["teacher"]].append(e["student_name"])
 
         classroom_svc = ClassroomService(teacher_email)
-        courses = classroom_svc.list_teacher_courses()
+        t = _mark('init_classroom', t)
+
+        # The course list changes only when a student joins the centre, so it's
+        # cached -- it is one large paged response otherwise fetched every time.
+        courses_key = ('courses', teacher_email)
+        courses = _CACHE.get(courses_key)
+        if courses is None:
+            courses = classroom_svc.list_teacher_courses()
+            _CACHE.put(courses_key, courses, _COURSES_TTL)
+        t = _mark('list_courses', t)
         logger.info(f"{sel_day} {sel_subject} {sel_time}: {len(courses)} active courses visible.")
 
         # The schedule is the source of truth for WHO should be on screen, so
@@ -792,11 +896,13 @@ async def classroom_dashboard(request: Request):
 
         # Students load concurrently -- each is 3 independent API calls, and
         # sequentially a full session took long enough to risk a timeout.
+        # Live every time: assignment data is never cached.
         if slate:
-            with ThreadPoolExecutor(max_workers=min(8, len(slate))) as pool:
+            with ThreadPoolExecutor(max_workers=min(16, len(slate))) as pool:
                 cards = list(pool.map(load_one, slate))
         else:
             cards = []
+        t = _mark('load_students', t)
 
         groups = []
         for teacher in sorted(by_teacher):
@@ -810,11 +916,13 @@ async def classroom_dashboard(request: Request):
             "unmatched": sum(1 for c in cards if c["state"] == "unmatched"),
             "errors": sum(1 for c in cards if c["state"] == "error"),
         }
-        logger.info(f"{sel_day} {sel_subject} {sel_time}: {summary}")
+        timings['total'] = round(time.perf_counter() - t_request, 2)
+        logger.info(f"{sel_day} {sel_subject} {sel_time}: {summary} timings={timings}")
 
         ctx.update({
             "groups": groups,
             "summary": summary,
+            "timings": timings,
             "unmatched": [c["name"] for c in cards if c["state"] == "unmatched"],
         })
         return templates.TemplateResponse(request, "session_dashboard.html", ctx)

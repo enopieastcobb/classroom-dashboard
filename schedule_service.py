@@ -176,7 +176,14 @@ class ScheduleService:
 
     def __init__(self, spreadsheet_id: str, credentials):
         self.spreadsheet_id = spreadsheet_id
-        self.service = build('sheets', 'v4', credentials=credentials, cache_discovery=False)
+        # static_discovery avoids fetching the discovery document over the
+        # network on every construction.
+        try:
+            self.service = build('sheets', 'v4', credentials=credentials,
+                                 cache_discovery=False, static_discovery=True)
+        except Exception as e:
+            logger.warning(f"static discovery unavailable for sheets v4 ({e}); fetching over network.")
+            self.service = build('sheets', 'v4', credentials=credentials, cache_discovery=False)
 
     def get_day_schedule(self, day: str) -> List[Dict[str, Any]]:
         if day not in self.DAYS:

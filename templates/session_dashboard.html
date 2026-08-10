@@ -177,6 +177,13 @@
 {% endif %}
 {% endfor %}
 
+{% if timings %}
+<p style="font-size:11px; color:#b9bec7; margin:18px 0 0;">
+  loaded in {{ timings.total }}s
+  {%- for k, v in timings.items() if k != 'total' %} · {{ k }} {{ v }}s{% endfor %}
+</p>
+{% endif %}
+
 {% for g in groups %}{% for s in g.students %}
 <div class="overlay" id="modal-{{ s.slug }}" data-overlay>
   <div class="modal">
