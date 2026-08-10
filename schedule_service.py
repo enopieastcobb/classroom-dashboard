@@ -50,8 +50,13 @@ def _format_time(value: Any) -> Optional[str]:
         return datetime.time(_to_afternoon(value.time().hour) % 24, value.minute).strftime("%I:%M %p").lstrip("0")
     if isinstance(value, str):
         s = value.strip()
-        if re.match(r'^\d{1,2}(:\d{2})?\s*(am|pm)$', s, re.IGNORECASE):
-            return s
+        # Accepts "3:00 PM", "3 PM", and the Sheets display form "3:00:00 PM".
+        m = re.match(r'^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*([ap]\.?m\.?)$', s, re.IGNORECASE)
+        if m:
+            hour = int(m.group(1)) % 12
+            if m.group(3).lower().startswith('p'):
+                hour += 12
+            return datetime.time(hour, int(m.group(2) or 0)).strftime("%I:%M %p").lstrip("0")
     return None
 
 
@@ -164,7 +169,8 @@ class ScheduleService:
     _FIELDS = (
         "sheets.data.rowData.values("
         "formattedValue,userEnteredValue,"
-        "userEnteredFormat(numberFormat.type,borders(top.style,bottom.style))"
+        "userEnteredFormat(numberFormat.type,borders(top.style,bottom.style)),"
+        "effectiveFormat(numberFormat.type,borders(top.style,bottom.style))"
         ")"
     )
 
@@ -193,9 +199,8 @@ class ScheduleService:
             grid_row = [self._cell_value(cell) for cell in cells]
             grid.append(grid_row)
             if cells:
-                borders = cells[0].get('userEnteredFormat', {}).get('borders', {})
-                col_a_top[row_idx] = bool(borders.get('top', {}).get('style'))
-                col_a_bottom[row_idx] = bool(borders.get('bottom', {}).get('style'))
+                col_a_top[row_idx] = self._has_border(cells[0], 'top')
+                col_a_bottom[row_idx] = self._has_border(cells[0], 'bottom')
 
         # A block boundary exists between row-1 and row if EITHER row has its
         # own top border OR the row above has a bottom border -- the sheet's
@@ -214,15 +219,35 @@ class ScheduleService:
         return entries
 
     @staticmethod
+    def _has_border(cell: Dict[str, Any], side: str) -> bool:
+        """
+        Checks both format views: a border typed directly into the sheet shows
+        up under userEnteredFormat, but one inherited from a range/theme only
+        appears under effectiveFormat. Missing either would silently collapse
+        every teacher block into one.
+        """
+        for view in ('userEnteredFormat', 'effectiveFormat'):
+            if cell.get(view, {}).get('borders', {}).get(side, {}).get('style'):
+                return True
+        return False
+
+    @staticmethod
     def _cell_value(cell: Dict[str, Any]) -> Any:
         uev = cell.get('userEnteredValue', {})
         if 'stringValue' in uev:
             return uev['stringValue']
         if 'numberValue' in uev:
-            num_format = cell.get('userEnteredFormat', {}).get('numberFormat', {})
-            if num_format.get('type') in ('TIME', 'DATE_TIME'):
+            # Check both format views -- a time format applied to a whole row
+            # only shows up under effectiveFormat.
+            is_time = any(
+                cell.get(view, {}).get('numberFormat', {}).get('type') in ('TIME', 'DATE_TIME')
+                for view in ('userEnteredFormat', 'effectiveFormat')
+            )
+            if is_time:
                 total_minutes = round(uev['numberValue'] * 24 * 60) % (24 * 60)
                 hours, minutes = divmod(total_minutes, 60)
                 return datetime.time(hours, minutes)
             return uev['numberValue']
-        return None
+        # Fall back to what the sheet displays (e.g. "3:00:00 PM") so a time
+        # header still parses even if the numeric/format pair is missing.
+        return cell.get('formattedValue')

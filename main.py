@@ -77,10 +77,20 @@ def nonce_processor(request: Request):
 
 templates = Jinja2Templates(directory="templates", context_processors=[nonce_processor])
 
-def get_teacher_creds_remote_signing(teacher_email: str, scopes: List[str]):
+def get_scoped_creds(scopes: List[str], subject: Optional[str] = None):
     """
-    Uses the IAM Credentials API to sign a JWT for Domain-Wide Delegation.
-    This avoids the need for a local Service Account JSON key.
+    Mints an access token by having the IAM Credentials API sign a JWT --
+    no Service Account JSON key on disk.
+
+    With `subject`, this is Domain-Wide Delegation: the token acts AS that
+    domain user (how the Classroom calls read a teacher's own courses).
+    Without it, the token acts as the service account itself -- which is what
+    the schedule Sheet needs, since the Sheet is shared directly with the
+    service account.
+
+    Either way the token carries exactly `scopes`. This matters: Cloud Run's
+    ambient (ADC) credentials carry only `cloud-platform`, which the Sheets
+    API rejects, so ADC cannot be used to read the Sheet directly.
     """
     if not DEFAULT_CREDS:
         raise RuntimeError("Google Default Credentials not initialized.")
@@ -88,17 +98,18 @@ def get_teacher_creds_remote_signing(teacher_email: str, scopes: List[str]):
     # Refresh default creds if expired
     if not DEFAULT_CREDS.valid:
         DEFAULT_CREDS.refresh(AUTH_HTTP_REQUEST)
-    
+
     iat = int(time.time())
     exp = iat + 3600
     payload = {
         "iss": SA_EMAIL,
-        "sub": teacher_email,
         "aud": "https://oauth2.googleapis.com/token",
         "iat": iat,
         "exp": exp,
         "scope": " ".join(scopes)
     }
+    if subject:
+        payload["sub"] = subject
 
     # Request Google to sign this JWT payload
     name = f"projects/-/serviceAccounts/{SA_EMAIL}"
@@ -106,7 +117,7 @@ def get_teacher_creds_remote_signing(teacher_email: str, scopes: List[str]):
         name=name,
         body={"payload": json.dumps(payload)}
     ).execute()
-    
+
     signed_jwt = response["signedJwt"]
 
     # Exchange the signed JWT for an access token
@@ -116,8 +127,21 @@ def get_teacher_creds_remote_signing(teacher_email: str, scopes: List[str]):
     )
     resp.raise_for_status()
     access_token = resp.json()["access_token"]
-    
+
     return oauth2_credentials.Credentials(access_token)
+
+
+def get_teacher_creds_remote_signing(teacher_email: str, scopes: List[str]):
+    """Domain-Wide Delegation: act as `teacher_email`."""
+    return get_scoped_creds(scopes, subject=teacher_email)
+
+
+SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+
+
+def get_schedule_service() -> ScheduleService:
+    """Reads the weekly schedule Sheet as the service account it's shared with."""
+    return ScheduleService(SCHEDULE_SPREADSHEET_ID, get_scoped_creds(SHEETS_SCOPES))
 
 class DataProcessor:
     """
@@ -455,7 +479,7 @@ async def classroom_dashboard(request: Request):
 
     try:
         teacher_email = _verify_and_get_email(id_token)
-        schedule_svc = ScheduleService(SCHEDULE_SPREADSHEET_ID, DEFAULT_CREDS)
+        schedule_svc = get_schedule_service()
 
         # Default to today when it's a session day, else the first one.
         if sel_day not in ScheduleService.DAYS:
