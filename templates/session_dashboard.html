@@ -31,6 +31,7 @@
   }
   .student-name { width:170px; flex:none; }
   .student-name .n { font-size:19px; font-weight:700; line-height:1.15; }
+  .student-name .g { font-size:13px; color:#9ca3af; margin-top:3px; }
   .badges { flex:1; display:flex; flex-wrap:wrap; gap:10px 12px; align-content:flex-start; padding:2px 8px; }
   .view-col {
     width:96px; flex:none; border-left:1px solid #e5e7eb; display:flex;
@@ -46,6 +47,8 @@
   .badge.notdone { background:#fff; border:1.5px solid #111827; color:#111827; }
   .badge.fic     { background:#ED5A52; border:1.5px solid #ED5A52; color:#fff; }
   .badge.done    { background:#eef0f2; border:1.5px solid #eef0f2; color:#4b5563; }
+  a.badge { text-decoration:none; }
+  .badge .fixby { font-size:10px; opacity:.85; margin-left:6px; }
   .badge .cat {
     position:absolute; left:-8px; top:-8px; width:18px; height:18px; border-radius:50%;
     background:#111827; color:#fff; font-size:10px; font-weight:700;
@@ -118,13 +121,23 @@
   <div class="group-cards">
     {% for s in g.students %}
     <div class="student" data-name="{{ s.name | lower }}">
-      <div class="student-name"><div class="n">{{ s.name }}</div></div>
+      <div class="student-name">
+        <div class="n">{{ s.name }}</div>
+        {% if s.grade %}<div class="g">{{ s.grade }}</div>{% endif %}
+      </div>
       <div class="badges">
         {% for i in s.todo %}
-        <span class="badge {{ i.status }}">
+        {% set body %}
           {% if i.category %}<span class="cat">{{ i.category }}</span>{% endif %}
           {{ i.title }}
-        </span>
+          {% if i.fix_by %}<span class="fixby">fix {{ i.fix_by }}</span>{% endif %}
+        {% endset %}
+        {% if i.link %}
+        <a class="badge {{ i.status }}" href="{{ i.link }}" target="_blank" rel="noopener noreferrer"
+           title="{{ i.given or i.material or i.title }}">{{ body }}</a>
+        {% else %}
+        <span class="badge {{ i.status }}" title="{{ i.given or i.material or i.title }}">{{ body }}</span>
+        {% endif %}
         {% else %}
         <span style="font-size:13px; color:#9ca3af; align-self:center;">Nothing outstanding.</span>
         {% endfor %}
@@ -149,7 +162,14 @@
       <button type="button" class="close-x" data-close>&times;</button>
       <div>
         <div class="modal-title">{{ s.name }}</div>
-        <div class="modal-sub">progress</div>
+        <div class="modal-sub">
+          {% if s.grade %}{{ s.grade }} · {% endif %}progress
+          {% if s.counts %}
+          <span style="margin-left:6px;">
+            {{ s.counts.done }} done · {{ s.counts.fic }} FIC · {{ s.counts.notdone }} not done
+          </span>
+          {% endif %}
+        </div>
       </div>
       <div class="subj-toggle">
         <button type="button" class="active" data-subj="English" data-for="{{ s.slug }}">english</button>

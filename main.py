@@ -151,10 +151,21 @@ class DataProcessor:
     against mock titles rather than the real Classroom ones.
     """
 
-    # An assignment is a "FIC" (Fix-It Center) item purely by its title
-    # containing the word "fic" -- per enopi-fic-pwa/spike/classroom-spike.mjs.
-    # Independent of completion status.
+    # FIC = "Fix-In-Class": an item returned to Classwork with a fix-by date.
+    # The grader marks it in the assignment title, e.g. "DGP Gr5 week 1. fic Jul1".
+    # The tag stays in the title forever so FIC history is preserved, so it only
+    # counts as an ACTIVE fic while the work still sits in Classwork/Homework.
     FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
+    FIC_DATE_RE = re.compile(r'fic\s+([A-Za-z]{3}\s?\d{1,2})', re.IGNORECASE)
+
+    # "To Be Graded" and "Graded" carry no subject in their name, so subject is
+    # inferred from the assignment title instead (pull-classroom-data.mjs).
+    ENGLISH_HINT = re.compile(
+        r'dgp|reading|root words|roots|grammar|vocab|critical reading|'
+        r'classic series|comprehension|selection', re.IGNORECASE)
+    MATH_HINT = re.compile(
+        r'logic|basic thinking|critical thinking|number sense|fraction|'
+        r'algebra|ratio|multiplication|division', re.IGNORECASE)
 
     # Title -> curriculum strand. Order matters: the first match wins, so more
     # specific patterns come before the ones that would also match them.
@@ -223,51 +234,78 @@ class DataProcessor:
             return None
 
     @staticmethod
-    def _subject_and_category(meta: Dict[str, Any], topic_by_id: Dict[str, str]):
+    def _subject_and_topic(topic_name: str, title: str):
         """
-        Both come from the Classroom topic name -- topics are named
-        "English Classwork", "English Homework", "Math Classwork", "Math Homework".
+        Subject (English/Math), workflow topic, and the C/H badge letter.
+
+        Topics are named "English Classwork", "Maths Homework", etc. -- but
+        "To Be Graded" and "Graded" name no subject, so those fall back to
+        matching the title (pull-classroom-data.mjs mapSubjectTopic).
         """
-        topic = (topic_by_id.get(meta.get('topicId')) or '').lower()
-        subject = 'English' if 'english' in topic else ('Math' if 'math' in topic else None)
-        category = 'H' if 'homework' in topic else ('C' if 'classwork' in topic else None)
-        return subject, category
+        t = topic_name or ''
+        if re.search(r'english', t, re.I):
+            subject = 'English'
+            topic = re.sub(r'english\s*', '', t, flags=re.I).strip() or 'Classwork'
+        elif re.search(r'math', t, re.I):
+            subject = 'Math'
+            topic = re.sub(r'maths?\s*', '', t, flags=re.I).strip() or 'Classwork'
+        else:
+            subject = 'Math' if DataProcessor.MATH_HINT.search(title or '') else 'English'
+            topic = t or 'Classwork'
+
+        low = topic.lower()
+        category = 'H' if 'homework' in low else ('C' if 'classwork' in low else None)
+        return subject, topic, category
 
     @staticmethod
-    def build_item(
-        meta: Dict[str, Any],
-        sub: Dict[str, Any],
-        topic_by_id: Dict[str, str],
-    ) -> Dict[str, Any]:
+    def _status(topic_name: str, title: str) -> str:
+        """
+        Status comes from WHICH TOPIC the work sits in -- the grader moves work
+        Classwork/Homework -> To Be Graded -> Graded, and that movement is the
+        signal (pull-classroom-data.mjs statusFor). Order matters here: "To Be
+        Graded" also contains the word "Graded".
+        """
+        t = topic_name or ''
+        if re.search(r'to be graded', t, re.I):
+            return 'submitted'
+        if re.search(r'graded', t, re.I):
+            return 'done'
+        return 'fic' if DataProcessor.FIC_RE.search(title or '') else 'notdone'
+
+    @staticmethod
+    def _fix_by(title: str) -> str:
+        """The fix-by date carried in a FIC title, e.g. '... . fic Jul1' -> 'Jul 7'."""
+        m = DataProcessor.FIC_DATE_RE.search(title or '')
+        if not m:
+            return ''
+        return re.sub(r'([A-Za-z]{3})(\d)', r'\1 \2', m.group(1))
+
+    @staticmethod
+    def build_item(meta: Dict[str, Any], topic_by_id: Dict[str, str]) -> Dict[str, Any]:
         title = meta.get('title') or ''
-        subject, category = DataProcessor._subject_and_category(meta, topic_by_id)
+        topic_name = topic_by_id.get(meta.get('topicId')) or ''
+        subject, topic, category = DataProcessor._subject_and_topic(topic_name, title)
         strand = DataProcessor.parse_strand(title)
-
-        state = sub.get('state')
-        graded = sub.get('assignedGrade') is not None
-        if graded or state == 'RETURNED':
-            status = 'done'
-        elif state == 'TURNED_IN':
-            status = 'submitted'
-        else:
-            status = 'notdone'
-
-        is_fic_title = bool(DataProcessor.FIC_RE.search(title))
-        # An outstanding FIC is its own status (red); a finished one is just
-        # done, tagged so the UI can mark it "fic ✓".
-        if is_fic_title and status == 'notdone':
-            status = 'fic'
+        status = DataProcessor._status(topic_name, title)
 
         due = DataProcessor._due(meta)
         posted = DataProcessor._posted(meta)
         done = status in ('done', 'submitted')
 
+        materials = meta.get('materials') or []
+        material = ''
+        if materials:
+            material = (materials[0].get('driveFile', {}).get('driveFile', {}).get('title') or '')
+
         return {
             "title": title,
             "subject": subject,
+            "topic": topic,
             "category": category,
             "status": status,
-            "was_fic": is_fic_title and done,
+            # The .fic tag is kept even once cleared, so FIC history survives.
+            "was_fic": bool(DataProcessor.FIC_RE.search(title)),
+            "fix_by": DataProcessor._fix_by(title),
             "strand_code": strand["code"],
             "strand_label": strand["label"],
             "level": DataProcessor.parse_level(title),
@@ -276,8 +314,20 @@ class DataProcessor:
             "month_label": posted.strftime('%b %Y') if posted else '',
             "due_label": due.strftime('%b %-d') if due else '',
             "overdue": bool(due and not done and due < date.today()),
-            "score": sub.get('assignedGrade'),
+            "material": material,
+            # "Given" is the physical notebook, recorded in the assignment header.
+            "given": re.sub(r'^given:\s*', '', meta.get('description') or '', flags=re.I),
+            # Deep-link straight to the item in Classroom.
+            "link": meta.get('alternateLink') or '',
             "max_points": meta.get('maxPoints'),
+        }
+
+    @staticmethod
+    def counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
+        return {
+            "done": sum(1 for i in items if i["status"] in ('done', 'submitted')),
+            "fic": sum(1 for i in items if i["status"] == 'fic'),
+            "notdone": sum(1 for i in items if i["status"] == 'notdone'),
         }
 
     @staticmethod
@@ -356,8 +406,9 @@ class ClassroomService:
         }
 
     def get_coursework(self, course_id: str) -> List[Dict[str, Any]]:
+        # PUBLISHED only -- a draft hasn't been assigned to the student yet.
         response = self.service.courses().courseWork().list(
-            courseId=course_id, courseWorkStates=['PUBLISHED', 'DRAFT']
+            courseId=course_id, courseWorkStates=['PUBLISHED']
         ).execute()
         return response.get('courseWork', [])
 
@@ -365,43 +416,38 @@ class ClassroomService:
         response = self.service.courses().topics().list(courseId=course_id).execute()
         return {t['topicId']: t.get('name', '') for t in response.get('topic', [])}
 
-    def get_submissions_batch(
-        self,
-        course_id: str,
-        assignments: List[Dict[str, Any]],
-        topic_by_id: Dict[str, str],
-    ) -> List[Dict[str, Any]]:
-        """One item per (assignment, submission) in this student's course."""
-        items: List[Dict[str, Any]] = []
-
-        def callback(request_id, response, exception):
-            if exception:
-                logger.error(f"Error fetching submissions for {request_id}: {exception}")
-                return
-            meta = next((a for a in assignments if a.get('id') == request_id), {})
-            for sub in response.get('studentSubmissions', []):
-                items.append(DataProcessor.build_item(meta, sub, topic_by_id))
-
-        batch = self.service.new_batch_http_request(callback=callback)
-        for assignment in assignments:
-            cw_id = assignment.get('id')
-            batch.add(self.service.courses().courseWork().studentSubmissions().list(
-                courseId=course_id, courseWorkId=cw_id), request_id=cw_id)
-        batch.execute()
-        return items
-
     def load_student(self, course_id: str) -> List[Dict[str, Any]]:
-        """All assignment items for one student's Classroom course."""
+        """
+        All assignment items for one student's Classroom course.
+
+        No studentSubmissions call: status comes from which topic the work sits
+        in, not from submission state, so coursework + topics is all that's
+        needed (two calls per student rather than one per assignment).
+        """
         assignments = self.get_coursework(course_id)
         if not assignments:
             return []
         topic_by_id = self.get_topics(course_id)
-        return self.get_submissions_batch(course_id, assignments, topic_by_id)
+        return [DataProcessor.build_item(a, topic_by_id) for a in assignments]
 
 
 def _normalize_name(name: str) -> str:
     name = re.sub(r'\(.*?\)', '', name)  # strip "(online)" etc.
     return re.sub(r'\s+', ' ', name).strip().lower()
+
+
+def split_course_name(course_name: str) -> Dict[str, str]:
+    """
+    "Aarav Mehta Gr3" -> name "Aarav Mehta", grade "Grade 3".
+
+    Tolerates every real-world variant seen: "Nathan W Gr 1[2026-2027]",
+    "Sanora S Gr 5 [2026-2027]", "Anush Patel Gr3 [...]", and compound
+    grades like "Gr7/8".
+    """
+    m = re.match(r'^(.*?)\s+Gr\s*([\d/]+)', course_name or '', re.IGNORECASE)
+    if m:
+        return {"name": m.group(1).strip(), "grade": f"Grade {m.group(2)}"}
+    return {"name": (course_name or '').strip(), "grade": ""}
 
 
 def find_course_for_student(courses: List[Dict[str, Any]], student_name: str) -> Optional[Dict[str, Any]]:
@@ -519,11 +565,13 @@ async def classroom_dashboard(request: Request):
                     unmatched.append(name)
                     continue
                 items = classroom_svc.load_student(course["id"])
-                subject_items = [i for i in items if i["subject"] == sel_subject] or items
+                subject_items = [i for i in items if i["subject"] == sel_subject]
                 students.append({
                     "name": name,
+                    "grade": split_course_name(course.get("name", "")).get("grade", ""),
                     "slug": re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-'),
                     "todo": DataProcessor.todo(subject_items),
+                    "counts": DataProcessor.counts(subject_items),
                     "grids": {
                         s: DataProcessor.grid([i for i in items if i["subject"] == s])
                         for s in ("English", "Math")
