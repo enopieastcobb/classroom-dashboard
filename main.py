@@ -359,20 +359,23 @@ class DataProcessor:
         """
         Whether an item is real assignable work belonging on this screen.
 
-        No due date means it isn't work the student owes: reference material
-        ("Proof Reading Guide", "DGP Gr2 Guide") and notices ("Summer Hours
-        for 2026") sit in a Classwork topic with no due date, and would
-        otherwise read as permanently "not done" and pad every alert list.
+        Everything in Homework is real assigned work and is ALWAYS kept, due
+        date or not -- a teacher may set an essay with no date on it, and that
+        is still work the student owes.
+
+        Elsewhere, no due date means it isn't owed: reference material ("Proof
+        Reading Guide", "DGP Gr2 Guide") and notices ("Summer Hours for 2026")
+        sit in a Classwork topic with no due date and would otherwise read as
+        permanently "not done", padding every alert list.
 
         Hard-copy handouts ("G-4 HC") DO carry a due date -- the physical book
-        is due back the following week -- so they are real tracked work and
-        stay on the screen.
+        is due back the following week -- so they are tracked work regardless.
         """
-        if not item["due_label"]:
-            return False
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
             return False
-        return True
+        if 'homework' in (item.get("topic") or '').lower():
+            return True
+        return bool(item["due_label"])
 
     @staticmethod
     def counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
