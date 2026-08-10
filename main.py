@@ -193,6 +193,10 @@ class DataProcessor:
         (re.compile(r'ratio', re.I), 'Ratios', 'Ratio'),
         (re.compile(r'multiplication', re.I), 'Multiplication', 'Mult'),
         (re.compile(r'writing', re.I), 'Writing', 'Writing'),
+        # "G-4 HC" / "R29 HC" = Hard Copy: a record that a physical book was
+        # handed to the student, not a curriculum strand. Grouped under one
+        # column so these don't each invent a junk column ("G", "R29", ...).
+        (re.compile(r'\bhc\b|hard copy', re.I), 'Hard Copy', 'HC'),
     ]
 
     @staticmethod
@@ -325,6 +329,8 @@ class DataProcessor:
             # The .fic tag is kept even once cleared, so FIC history survives.
             "was_fic": bool(DataProcessor.FIC_RE.search(title)),
             "fix_by": DataProcessor._fix_by(title),
+            # "inc" in a title means the work came back incomplete.
+            "incomplete": bool(re.search(r'\binc\b', title, re.I)),
             "strand_code": strand["code"],
             "strand_label": strand["label"],
             "level": DataProcessor.parse_level(title),
@@ -351,8 +357,19 @@ class DataProcessor:
 
     @staticmethod
     def todo(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Outstanding work only: not-started first, then FICs (progress.js todo())."""
-        order = {'notdone': 0, 'fic': 1}
+        """
+        Outstanding work only, FICs FIRST.
+
+        A FIC ("Fix In Class") is the alert condition: the student turned the
+        work in, it was graded, and there were enough mistakes that a teacher
+        has to rework it with them in the next class. That is the thing this
+        screen exists to surface, so it leads.
+
+        Note this deliberately inverts progress.js todo(), which ordered
+        not-done first -- the reference screenshots show the red FIC badges
+        leading each student's row.
+        """
+        order = {'fic': 0, 'notdone': 1}
         return sorted(
             (i for i in items if i["status"] in order),
             key=lambda i: order[i["status"]],

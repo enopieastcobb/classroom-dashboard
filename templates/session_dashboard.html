@@ -136,6 +136,7 @@
         {% set body %}
           {% if i.category %}<span class="cat">{{ i.category }}</span>{% endif %}
           {{ i.title }}
+          {% if i.incomplete %}<span class="fixby">incomplete</span>{% endif %}
           {% if i.fix_by %}<span class="fixby">fix {{ i.fix_by }}</span>{% endif %}
         {% endset %}
         {% if i.link %}
