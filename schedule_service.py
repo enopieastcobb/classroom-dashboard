@@ -29,6 +29,7 @@ MAKEUP_HEADERS = {
     'student name': 'student_name',
     'make-up time': 'time',
     'subject': 'subject',
+    'notes': 'notes',
 }
 
 
@@ -228,8 +229,9 @@ def parse_makeups(grid: List[List[Any]]) -> "tuple[List[Dict[str, Any]], List[st
         name = cell(row, 'student_name')
         raw_time = cell(row, 'time')
         subject = cell(row, 'subject')
+        notes = cell(row, 'notes')
 
-        if all(_is_blank(v) for v in (raw_date, name, raw_time, subject)):
+        if all(_is_blank(v) for v in (raw_date, name, raw_time, subject, notes)):
             continue
         if _is_blank(name):
             warnings.append(
@@ -245,9 +247,10 @@ def parse_makeups(grid: List[List[Any]]) -> "tuple[List[Dict[str, Any]], List[st
             "student_name": str(name).strip(),
             "time": _format_time(raw_time) or '',
             "subject": str(subject).strip().title() if not _is_blank(subject) else '',
+            "notes": '' if _is_blank(notes) else str(notes).strip(),
         }
         key = (entry["date"], entry["date_raw"], entry["student_name"],
-               entry["time"], entry["subject"])
+               entry["time"], entry["subject"], entry["notes"])
         if key in seen:
             continue
         seen.add(key)

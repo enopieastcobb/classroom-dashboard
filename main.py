@@ -833,7 +833,7 @@ async def classroom_dashboard(request: Request):
         "day": sel_day, "subject": sel_subject, "time": sel_time,
         "room_label": ROOM_LABEL,
         "walkins": walkins, "walkins_field": "|".join(walkins),
-        "all_students": [],
+        "all_students": [], "upcoming_makeups": [], "session_date": "",
     }
 
     timings: Dict[str, float] = {}
@@ -916,16 +916,37 @@ async def classroom_dashboard(request: Request):
             and (m["date"] == session_date or m["date"] is None)
         ]
 
+        # Advance notice only, deliberately kept OUT of the roster above: that
+        # list has to stay exactly who is in the room right now. Not filtered
+        # by room or slot -- anything coming up on this day is worth seeing --
+        # and no Classroom data is fetched for these, so it costs nothing.
+        upcoming_makeups = sorted(
+            (m for m in all_makeups if m["date"] and session_date and m["date"] > session_date),
+            key=lambda m: (m["date"], _time_key(m["time"]), m["student_name"]),
+        )
+        upcoming_view = [{
+            "date_label": m["date"].strftime('%a %b %-d'),
+            "student_name": m["student_name"],
+            "time": m["time"],
+            "subject": m["subject"],
+            "room": ROOM_LABEL.get(m["subject"], m["subject"]),
+            "notes": m["notes"],
+        } for m in upcoming_makeups]
+
         slate = [(teacher, n, False)
                  for teacher in sorted(by_teacher)
                  for n in by_teacher[teacher]]
         slate += [(WALKIN_GROUP, n, True)
                   for n in walkins if n not in scheduled_names]
         slate += [(MAKEUP_GROUP, m["student_name"], False) for m in makeups]
-        makeup_note = {
-            m["student_name"]: ('' if m["date"] else f"date not specified ({m['date_raw']})")
-            for m in makeups
-        }
+        makeup_note = {}
+        for m in makeups:
+            parts = []
+            if not m["date"]:
+                parts.append(f"date not specified ({m['date_raw']})")
+            if m["notes"]:
+                parts.append(m["notes"])
+            makeup_note[m["student_name"]] = " · ".join(parts)
 
         def load_one(entry):
             teacher, name, is_walkin = entry
@@ -996,6 +1017,7 @@ async def classroom_dashboard(request: Request):
             "summary": summary,
             "timings": timings,
             "all_students": all_students,
+            "upcoming_makeups": upcoming_view,
             "session_date": session_date.strftime('%a %b %-d') if session_date else '',
             "unmatched": [c["name"] for c in cards if c["state"] == "unmatched"],
         })

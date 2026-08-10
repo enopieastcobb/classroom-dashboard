@@ -232,6 +232,32 @@
 {% endif %}
 {% endfor %}
 
+{% if upcoming_makeups %}
+<div class="card" style="margin-top:22px;">
+  <h2 style="font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+             color:#6b7280; margin:0 0 4px;">Upcoming make-ups</h2>
+  <p style="font-size:12px; color:#9ca3af; margin:0 0 12px;">
+    Later {{ day }}s — not in today's room.
+  </p>
+  <table class="grid">
+    <thead>
+      <tr><th>Date</th><th>Student</th><th>Time</th><th>Room</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      {% for m in upcoming_makeups %}
+      <tr>
+        <td class="date">{{ m.date_label }}</td>
+        <td class="date">{{ m.student_name }}</td>
+        <td class="date">{{ m.time or '—' }}</td>
+        <td class="date">{{ m.room or '—' }}</td>
+        <td class="date" style="color:#6b7280;">{{ m.notes or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% if timings %}
 <p style="font-size:11px; color:#b9bec7; margin:18px 0 0;">
   loaded in {{ timings.total }}s
