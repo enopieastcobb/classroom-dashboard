@@ -694,23 +694,39 @@ class ClassroomService:
         """
         All assignment items for one student's Classroom course.
 
-        Three calls per student: coursework, topics, and all submissions.
+        Three calls per student -- coursework, topics and all submissions --
+        issued CONCURRENTLY. None depends on another's result, and run in
+        sequence they tripled the wall time of every student: measured on a
+        4-student session, this phase was 7.95s of a 10.6s page.
+
         Status comes from the topic the work sits in, but the SCORE only
         exists on the submission, so graded items need it to show their marks.
 
         Never cached. A student can turn work in at any moment and the screen
         has to reflect it on the next load.
         """
-        assignments = self.get_coursework(course_id)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_work = pool.submit(self.get_coursework, course_id)
+            f_topics = pool.submit(self.get_topics, course_id)
+            f_subs = pool.submit(self.get_submissions_by_coursework, course_id)
+
+            assignments = f_work.result()
+            try:
+                topic_by_id = f_topics.result()
+            except Exception as e:
+                # Without topics every item loses its status and subject, so
+                # this one is fatal for the student -- let it surface.
+                logger.error(f"Course {course_id}: could not load topics ({e}).")
+                raise
+            try:
+                subs_by_cw = f_subs.result()
+            except Exception as e:
+                # Scores are enrichment -- losing them must not lose the items.
+                logger.warning(f"Course {course_id}: could not load submissions ({e}); scores omitted.")
+                subs_by_cw = {}
+
         if not assignments:
             return []
-        topic_by_id = self.get_topics(course_id)
-        try:
-            subs_by_cw = self.get_submissions_by_coursework(course_id)
-        except Exception as e:
-            # Scores are enrichment -- losing them must not lose the items.
-            logger.warning(f"Course {course_id}: could not load submissions ({e}); scores omitted.")
-            subs_by_cw = {}
         items = [
             DataProcessor.build_item(a, topic_by_id, subs_by_cw.get(a.get('id')))
             for a in assignments
