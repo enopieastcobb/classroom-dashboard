@@ -347,6 +347,27 @@ class DataProcessor:
             "max_points": meta.get('maxPoints'),
         }
 
+    # Strands kept off this screen entirely. "Problem of the Day" is tracked
+    # separately for now -- dropping 'POD' from this set brings it straight back.
+    EXCLUDED_STRAND_CODES = {'POD'}
+
+    @staticmethod
+    def is_trackable(item: Dict[str, Any]) -> bool:
+        """
+        Whether an item is real assignable work belonging on this screen.
+
+        No due date means it isn't work the student owes: reference material
+        ("Proof Reading Guide", "DGP Gr2 Guide"), hard-copy handout records
+        ("G-4 HC"), and notices ("Summer Hours for 2026") all live in a
+        Classwork topic with no due date, and would otherwise read as
+        permanently "not done" and pad every teacher's alert list.
+        """
+        if not item["due_label"]:
+            return False
+        if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
+            return False
+        return True
+
     @staticmethod
     def counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
         return {
@@ -487,7 +508,16 @@ class ClassroomService:
         if not assignments:
             return []
         topic_by_id = self.get_topics(course_id)
-        return [DataProcessor.build_item(a, topic_by_id) for a in assignments]
+        items = [DataProcessor.build_item(a, topic_by_id) for a in assignments]
+
+        kept = [i for i in items if DataProcessor.is_trackable(i)]
+        if len(kept) != len(items):
+            logger.info(
+                f"Course {course_id}: showing {len(kept)} of {len(items)} items "
+                f"({len(items) - len(kept)} filtered as reference material / "
+                f"no due date / excluded strand)."
+            )
+        return kept
 
 
 def _normalize_name(name: str) -> str:
