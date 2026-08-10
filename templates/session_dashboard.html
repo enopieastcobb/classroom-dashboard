@@ -113,12 +113,13 @@
   <input id="studentSearch" type="text" placeholder="Search this session…">
 </div>
 
-{% if unmatched %}
-<div class="card" style="border-color:#ED5A52; background:#fdf2f2; padding:12px 14px;">
-  <p style="font-size:13px; color:#8a2020; margin:0;">
-    No matching Google Classroom class found for: {{ unmatched | join(', ') }}
-  </p>
-</div>
+{% if summary and summary.scheduled %}
+<p style="font-size:12px; margin:0 0 12px; color:{{ '#8a2020' if (summary.unmatched or summary.errors) else '#6b7280' }};">
+  {{ summary.scheduled }} scheduled this session ·
+  {{ summary.loaded }} loaded
+  {%- if summary.unmatched %} · {{ summary.unmatched }} with no matching Classroom class{% endif %}
+  {%- if summary.errors %} · {{ summary.errors }} failed to load{% endif %}
+</p>
 {% endif %}
 
 {% for g in groups %}
@@ -146,9 +147,13 @@
         <span class="badge {{ i.status }}" title="{{ i.given or i.material or i.title }}">{{ body }}</span>
         {% endif %}
         {% else %}
-          {% if s.load_error %}
+          {% if s.state == 'unmatched' %}
           <span style="font-size:12px; color:#8a2020; align-self:center;">
-            Couldn't load this student's Classroom data — {{ s.load_error }}
+            No Google Classroom class matched this name — check the spelling in the schedule against Classroom.
+          </span>
+          {% elif s.state == 'error' %}
+          <span style="font-size:12px; color:#8a2020; align-self:center;">
+            Couldn't load from Classroom — {{ s.load_error }}
           </span>
           {% else %}
           <span style="font-size:13px; color:#9ca3af; align-self:center;">Nothing outstanding.</span>
@@ -156,7 +161,11 @@
         {% endfor %}
       </div>
       <div class="view-col">
+        {% if s.state == 'ok' %}
         <button type="button" class="view-btn" data-open="modal-{{ s.slug }}">View<br>Progress</button>
+        {% else %}
+        <span style="font-size:12px; color:#d1d5db;">—</span>
+        {% endif %}
       </div>
     </div>
     {% endfor %}

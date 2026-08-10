@@ -2,6 +2,10 @@ from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.templating import Jinja2Templates
 from googleapiclient.discovery import build
+import google_auth_httplib2
+import httplib2
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from google.oauth2 import id_token as google_id_token, credentials as oauth2_credentials
 from google.auth.transport import requests as transport_requests
 import google.auth
@@ -486,6 +490,7 @@ class ClassroomService:
             
         logger.info(f"Impersonating Google Classroom user via Remote Signing: {teacher_email}")
         self.creds = get_teacher_creds_remote_signing(teacher_email, self.scopes)
+        self._local = threading.local()
         try:
             # Classroom API discovery is cached internally by the library, but we disable file cache for Cloud Shell
             self.service = build('classroom', 'v1', credentials=self.creds, cache_discovery=False)
@@ -493,8 +498,32 @@ class ClassroomService:
             logger.error(f"Failed to build Classroom service (likely identity/Gaia issue): {e}")
             raise
 
-    @staticmethod
-    def _all_pages(collection, key: str, **kwargs) -> List[Dict[str, Any]]:
+    def _http(self):
+        """
+        A separate authorized Http per thread.
+
+        httplib2 is not thread-safe, and the service object built by build()
+        carries a single shared Http. Loading students concurrently on that
+        shared object corrupts responses -- which is exactly how a session
+        loses an unpredictable subset of its students. Passing a per-thread
+        http to execute() is the documented way to use one service from
+        several threads.
+        """
+        if not hasattr(self._local, 'http'):
+            self._local.http = google_auth_httplib2.AuthorizedHttp(
+                self.creds, http=httplib2.Http(timeout=60))
+        return self._local.http
+
+    def _execute(self, request):
+        """
+        Runs a request on this thread's http, retrying transient failures.
+
+        num_retries applies the client's exponential backoff to 429 and 5xx --
+        without it a single rate-limit blip silently drops one student.
+        """
+        return request.execute(http=self._http(), num_retries=4)
+
+    def _all_pages(self, collection, key: str, **kwargs) -> List[Dict[str, Any]]:
         """
         Drains every page of a Classroom list call.
 
@@ -506,13 +535,13 @@ class ClassroomService:
         out: List[Dict[str, Any]] = []
         request = collection.list(pageSize=200, **kwargs)
         while request is not None:
-            response = request.execute()
+            response = self._execute(request)
             out.extend(response.get(key, []))
             request = collection.list_next(request, response)
         return out
 
     def get_course_details(self, course_id: str):
-        return self.service.courses().get(id=course_id).execute()
+        return self._execute(self.service.courses().get(id=course_id))
 
     def list_teacher_courses(self) -> List[Dict[str, Any]]:
         """Lists all active courses where the user is a teacher."""
@@ -719,44 +748,75 @@ async def classroom_dashboard(request: Request):
 
         classroom_svc = ClassroomService(teacher_email)
         courses = classroom_svc.list_teacher_courses()
+        logger.info(f"{sel_day} {sel_subject} {sel_time}: {len(courses)} active courses visible.")
 
-        groups, unmatched = [], []
+        # The schedule is the source of truth for WHO should be on screen, so
+        # the slate is built from it first. Every scheduled student gets a card
+        # no matter what their Classroom lookup does -- a teacher must never
+        # have to wonder whether the list is complete.
+        slate = [(t, n) for t in sorted(by_teacher) for n in by_teacher[t]]
+
+        def load_one(entry):
+            teacher, name = entry
+            card = {
+                "teacher": teacher,
+                "name": name,
+                "slug": re.sub(r'[^a-z0-9]+', '-', f"{teacher}-{name}".lower()).strip('-'),
+                "grade": "", "todo": [], "counts": DataProcessor.counts([]),
+                "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
+                "state": "ok", "load_error": "",
+            }
+            course = find_course_for_student(courses, name)
+            if not course:
+                card["state"] = "unmatched"
+                return card
+            card["grade"] = split_course_name(course.get("name", "")).get("grade", "")
+            try:
+                items = classroom_svc.load_student(course["id"])
+            except Exception as student_err:
+                logger.error(
+                    f"Failed to load Classroom data for '{name}' "
+                    f"(course {course.get('id')}): {student_err}", exc_info=True)
+                card["state"] = "error"
+                card["load_error"] = f"{type(student_err).__name__}: {student_err}"
+                return card
+
+            subject_items = [i for i in items if i["subject"] == sel_subject]
+            card["todo"] = DataProcessor.todo(subject_items)
+            card["counts"] = DataProcessor.counts(subject_items)
+            card["grids"] = {
+                s: DataProcessor.grid([i for i in items if i["subject"] == s])
+                for s in ("English", "Math")
+            }
+            return card
+
+        # Students load concurrently -- each is 3 independent API calls, and
+        # sequentially a full session took long enough to risk a timeout.
+        if slate:
+            with ThreadPoolExecutor(max_workers=min(8, len(slate))) as pool:
+                cards = list(pool.map(load_one, slate))
+        else:
+            cards = []
+
+        groups = []
         for teacher in sorted(by_teacher):
-            students = []
-            for name in by_teacher[teacher]:
-                course = find_course_for_student(courses, name)
-                if not course:
-                    unmatched.append(name)
-                    continue
-                # One student's course failing must not blank the whole
-                # session -- show that student with a note instead.
-                try:
-                    items = classroom_svc.load_student(course["id"])
-                    load_error = ""
-                except Exception as student_err:
-                    logger.error(
-                        f"Failed to load Classroom data for '{name}' "
-                        f"(course {course.get('id')}): {student_err}", exc_info=True)
-                    items = []
-                    load_error = f"{type(student_err).__name__}: {student_err}"
+            in_group = [c for c in cards if c["teacher"] == teacher]
+            if in_group:
+                groups.append({"teacher": teacher, "students": in_group})
 
-                subject_items = [i for i in items if i["subject"] == sel_subject]
-                students.append({
-                    "name": name,
-                    "grade": split_course_name(course.get("name", "")).get("grade", ""),
-                    "slug": re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-'),
-                    "todo": DataProcessor.todo(subject_items),
-                    "counts": DataProcessor.counts(subject_items),
-                    "load_error": load_error,
-                    "grids": {
-                        s: DataProcessor.grid([i for i in items if i["subject"] == s])
-                        for s in ("English", "Math")
-                    },
-                })
-            if students:
-                groups.append({"teacher": teacher, "students": students})
+        summary = {
+            "scheduled": len(cards),
+            "loaded": sum(1 for c in cards if c["state"] == "ok"),
+            "unmatched": sum(1 for c in cards if c["state"] == "unmatched"),
+            "errors": sum(1 for c in cards if c["state"] == "error"),
+        }
+        logger.info(f"{sel_day} {sel_subject} {sel_time}: {summary}")
 
-        ctx.update({"groups": groups, "unmatched": unmatched})
+        ctx.update({
+            "groups": groups,
+            "summary": summary,
+            "unmatched": [c["name"] for c in cards if c["state"] == "unmatched"],
+        })
         return templates.TemplateResponse(request, "session_dashboard.html", ctx)
 
     except Exception as e:
