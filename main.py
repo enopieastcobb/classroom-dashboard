@@ -338,6 +338,9 @@ class DataProcessor:
             "posted_label": posted.strftime('%b %-d') if posted else '',
             "month_label": posted.strftime('%b %Y') if posted else '',
             "due_label": due.strftime('%b %-d') if due else '',
+            # Sortable form, so items can be ordered most-urgent-first within
+            # a priority tier. Undated sorts last.
+            "due_key": due.isoformat() if due else '9999-12-31',
             "overdue": bool(due and not done and due < date.today()),
             "material": material,
             # "Given" is the physical notebook, recorded in the assignment header.
@@ -357,10 +360,13 @@ class DataProcessor:
         Whether an item is real assignable work belonging on this screen.
 
         No due date means it isn't work the student owes: reference material
-        ("Proof Reading Guide", "DGP Gr2 Guide"), hard-copy handout records
-        ("G-4 HC"), and notices ("Summer Hours for 2026") all live in a
-        Classwork topic with no due date, and would otherwise read as
-        permanently "not done" and pad every teacher's alert list.
+        ("Proof Reading Guide", "DGP Gr2 Guide") and notices ("Summer Hours
+        for 2026") sit in a Classwork topic with no due date, and would
+        otherwise read as permanently "not done" and pad every alert list.
+
+        Hard-copy handouts ("G-4 HC") DO carry a due date -- the physical book
+        is due back the following week -- so they are real tracked work and
+        stay on the screen.
         """
         if not item["due_label"]:
             return False
@@ -377,23 +383,36 @@ class DataProcessor:
         }
 
     @staticmethod
+    def priority(item: Dict[str, Any]) -> int:
+        """
+        Urgency tier, in the order teachers work a session:
+
+          0  FIC       - turned in, graded, too many mistakes: must be reworked
+                         with the student in class. The alert condition.
+          1  INC       - came back incomplete
+          2  Past due  - owed and the due date has gone by
+          3  Due later - due today or in future
+        """
+        if item["status"] == 'fic':
+            return 0
+        if item["incomplete"]:
+            return 1
+        if item["overdue"]:
+            return 2
+        return 3
+
+    @staticmethod
     def todo(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Outstanding work only, FICs FIRST.
+        Outstanding work only, ordered FIC -> INC -> past due -> due later,
+        and within each tier by due date so the most urgent leads.
 
-        A FIC ("Fix In Class") is the alert condition: the student turned the
-        work in, it was graded, and there were enough mistakes that a teacher
-        has to rework it with them in the next class. That is the thing this
-        screen exists to surface, so it leads.
-
-        Note this deliberately inverts progress.js todo(), which ordered
-        not-done first -- the reference screenshots show the red FIC badges
-        leading each student's row.
+        This deliberately replaces progress.js todo(), which only had two
+        tiers and put not-started work ahead of FICs.
         """
-        order = {'fic': 0, 'notdone': 1}
         return sorted(
-            (i for i in items if i["status"] in order),
-            key=lambda i: order[i["status"]],
+            (i for i in items if i["status"] in ('fic', 'notdone')),
+            key=lambda i: (DataProcessor.priority(i), i["due_key"]),
         )
 
     @staticmethod
