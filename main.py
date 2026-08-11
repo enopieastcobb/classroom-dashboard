@@ -430,7 +430,10 @@ class DataProcessor:
         due = DataProcessor._due(meta)
         posted = DataProcessor._posted(meta)
         done = status in ('done', 'submitted')
-        turned_in = (sub or {}).get('state') in ('TURNED_IN', 'RETURNED')
+        # TURNED_IN only. RETURNED means the grader handed the work BACK to the
+        # student, so it is active again -- that is precisely how a FIC arises,
+        # and dropping it would hide the very thing this screen is for.
+        turned_in = (sub or {}).get('state') == 'TURNED_IN'
 
         materials = meta.get('materials') or []
         material = ''
@@ -487,11 +490,12 @@ class DataProcessor:
             "max_points": meta.get('maxPoints'),
             "late": bool((sub or {}).get('late')),
             "submission_state": (sub or {}).get('state') or '',
-            # Has the student actually handed it in? Status is driven by the
+            # Is the work currently with the grader? Status is driven by the
             # topic, but a student can turn work in before the grader moves it
             # out of Classwork -- in which case the topic still says "not done"
             # while the work is in fact submitted. This keeps it off the
             # teacher's action list without disturbing the topic-based status.
+            # RETURNED is NOT this: that work is back with the student.
             "turned_in": turned_in,
         }
 
