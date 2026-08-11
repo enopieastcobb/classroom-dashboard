@@ -71,6 +71,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         ]
         response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
         response.headers["X-Content-Type-Options"] = "nosniff"
+        # Never let a browser or proxy serve a stale roster. A student can turn
+        # work in at any moment, so every load must reach the app.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
@@ -438,6 +442,9 @@ class DataProcessor:
             "fix_by": DataProcessor._fix_by(title),
             # "inc" in a title means the work came back incomplete.
             "incomplete": bool(re.search(r'\binc\b', title, re.I)),
+            # A test needs to catch a teacher's eye, so it's flagged for the UI.
+            # Word-boundary, so "Testing"/"Contest" don't trip it.
+            "is_test": bool(re.search(r'\btests?\b', title, re.I)),
             "strand_code": strand["code"],
             "strand_label": strand["label"],
             "level": DataProcessor.parse_level(title),
@@ -467,6 +474,15 @@ class DataProcessor:
     # Strands kept off this screen entirely. "Problem of the Day" is tracked
     # separately for now -- dropping 'POD' from this set brings it straight back.
     EXCLUDED_STRAND_CODES = {'POD'}
+
+    @staticmethod
+    def hidden_reason(item: Dict[str, Any]) -> str:
+        """Why an item is being withheld, phrased for the person who wrote it."""
+        if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
+            return "Problem of the Day (tracked separately)"
+        if 'homework' not in (item.get("topic") or '').lower() and not item["due_label"]:
+            return "no due date set"
+        return ""
 
     @staticmethod
     def is_trackable(item: Dict[str, Any]) -> bool:
@@ -727,19 +743,13 @@ class ClassroomService:
 
         if not assignments:
             return []
-        items = [
+        # Returns EVERY item, unfiltered. The caller decides what to show, so
+        # that anything held back can be reported rather than disappearing --
+        # "my new assignment isn't showing" has to be answerable from the page.
+        return [
             DataProcessor.build_item(a, topic_by_id, subs_by_cw.get(a.get('id')))
             for a in assignments
         ]
-
-        kept = [i for i in items if DataProcessor.is_trackable(i)]
-        if len(kept) != len(items):
-            logger.info(
-                f"Course {course_id}: showing {len(kept)} of {len(items)} items "
-                f"({len(items) - len(kept)} filtered as reference material / "
-                f"no due date / excluded strand)."
-            )
-        return kept
 
 
 def _normalize_name(name: str) -> str:
@@ -975,7 +985,7 @@ async def classroom_dashboard(request: Request):
                 "slug": re.sub(r'[^a-z0-9]+', '-', f"{teacher}-{name}".lower()).strip('-'),
                 "grade": "", "todo": [], "counts": DataProcessor.counts([]),
                 "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
-                "state": "ok", "load_error": "",
+                "state": "ok", "load_error": "", "hidden": [],
             }
             course = find_course_for_student(courses, name)
             if not course:
@@ -992,11 +1002,21 @@ async def classroom_dashboard(request: Request):
                 card["load_error"] = f"{type(student_err).__name__}: {student_err}"
                 return card
 
-            subject_items = [i for i in items if i["subject"] == sel_subject]
+            shown = [i for i in items if DataProcessor.is_trackable(i)]
+            # Anything withheld is reported on the card with the reason, so a
+            # newly-added assignment that doesn't appear can be explained
+            # instead of looking like the page is stale.
+            card["hidden"] = [
+                {"title": i["title"], "reason": DataProcessor.hidden_reason(i)}
+                for i in items if not DataProcessor.is_trackable(i)
+                and i["subject"] == sel_subject
+            ]
+
+            subject_items = [i for i in shown if i["subject"] == sel_subject]
             card["todo"] = DataProcessor.todo(subject_items)
             card["counts"] = DataProcessor.counts(subject_items)
             card["grids"] = {
-                s: DataProcessor.grid([i for i in items if i["subject"] == s])
+                s: DataProcessor.grid([i for i in shown if i["subject"] == s])
                 for s in ("English", "Math")
             }
             return card

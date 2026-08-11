@@ -60,6 +60,21 @@
   .badge.fic     { background:#ED5A52; border:1.5px solid #ED5A52; color:#fff; }
   .badge.done    { background:#eef0f2; border:1.5px solid #eef0f2; color:#4b5563; }
   a.badge { text-decoration:none; }
+  /* A test has to catch the eye across a room. */
+  .test-star {
+    color:#ED1C24; font-size:15px; line-height:1; margin-right:5px;
+    animation: starBlink 1s steps(1, end) infinite;
+  }
+  @keyframes starBlink { 0%,49% { opacity:1; } 50%,100% { opacity:.15; } }
+  /* Respect a reader who has asked for less motion: keep it red, stop it blinking. */
+  @media (prefers-reduced-motion: reduce) {
+    .test-star { animation:none; opacity:1; }
+  }
+  .badge.is-test { border-color:#ED1C24; }
+  .hidden-note {
+    font-size:11px; color:#9ca3af; margin-top:6px; cursor:help;
+    border-bottom:1px dotted #d1d5db; display:inline-block;
+  }
   .badge .fixby { font-size:10px; opacity:.85; margin-left:6px; }
   .badge .cat {
     position:absolute; left:-8px; top:-8px; width:18px; height:18px; border-radius:50%;
@@ -191,15 +206,18 @@
         {% for i in s.todo %}
         {% set body %}
           {% if i.category %}<span class="cat">{{ i.category }}</span>{% endif %}
+          {% if i.is_test %}<span class="test-star" aria-label="Test">&#9733;</span>{% endif %}
           {{ i.title }}
           {% if i.incomplete %}<span class="fixby">incomplete</span>{% endif %}
           {% if i.fix_by %}<span class="fixby">fix {{ i.fix_by }}</span>{% endif %}
         {% endset %}
         {% if i.link %}
-        <a class="badge {{ i.status }}" href="{{ i.link }}" target="_blank" rel="noopener noreferrer"
+        <a class="badge {{ i.status }}{% if i.is_test %} is-test{% endif %}" href="{{ i.link }}"
+           target="_blank" rel="noopener noreferrer"
            title="{{ i.given or i.material or i.title }}">{{ body }}</a>
         {% else %}
-        <span class="badge {{ i.status }}" title="{{ i.given or i.material or i.title }}">{{ body }}</span>
+        <span class="badge {{ i.status }}{% if i.is_test %} is-test{% endif %}"
+              title="{{ i.given or i.material or i.title }}">{{ body }}</span>
         {% endif %}
         {% else %}
           {% if s.state == 'unmatched' %}
@@ -214,6 +232,13 @@
           <span style="font-size:13px; color:#9ca3af; align-self:center;">Nothing outstanding.</span>
           {% endif %}
         {% endfor %}
+        {% if s.hidden %}
+        <div style="flex-basis:100%;">
+          <span class="hidden-note"
+                title="{% for hd in s.hidden %}{{ hd.title }} — {{ hd.reason }}
+{% endfor %}">{{ s.hidden | length }} assignment{{ 's' if s.hidden|length != 1 }} not shown (hover to see why)</span>
+        </div>
+        {% endif %}
       </div>
       <div class="view-col">
         {% if s.state == 'ok' %}
@@ -312,12 +337,14 @@
                 {% if cell %}
                   {% for it in cell %}
                   <div style="margin:2px 0;">
+                    {% set cell_body %}{% if it.is_test %}<span class="test-star" aria-label="Test">&#9733;</span>{% endif %}{{ it.title }}{% endset %}
                     {% if it.link %}
-                    <a class="badge {{ it.status }}" href="{{ it.link }}" target="_blank"
-                       rel="noopener noreferrer" title="{{ it.given or it.material or it.title }}">{{ it.title }}</a>
+                    <a class="badge {{ it.status }}{% if it.is_test %} is-test{% endif %}"
+                       href="{{ it.link }}" target="_blank" rel="noopener noreferrer"
+                       title="{{ it.given or it.material or it.title }}">{{ cell_body }}</a>
                     {% else %}
-                    <span class="badge {{ it.status }}"
-                          title="{{ it.given or it.material or it.title }}">{{ it.title }}</span>
+                    <span class="badge {{ it.status }}{% if it.is_test %} is-test{% endif %}"
+                          title="{{ it.given or it.material or it.title }}">{{ cell_body }}</span>
                     {% endif %}
                     {% if it.score is not none %}
                     <span class="cell-note"><strong>{{ it.score }}{% if it.max_points %}/{{ it.max_points }}{% endif %}</strong></span>
