@@ -81,6 +81,10 @@
     background:#111827; color:#fff; font-size:10px; font-weight:700;
     display:flex; align-items:center; justify-content:center;
   }
+  /* The C/H badge carries the due signal: green while there's still time,
+     red once the date has gone by. Neutral when nothing is owed. */
+  .badge .cat.due-later { background:#1E8E3E; }
+  .badge .cat.past-due  { background:#D93025; }
 
   .overlay {
     display:none; position:fixed; inset:0; background:rgba(0,0,0,.45);
@@ -205,7 +209,10 @@
       <div class="badges">
         {% for i in s.todo %}
         {% set body %}
-          {% if i.category %}<span class="cat">{{ i.category }}</span>{% endif %}
+          {% if i.category %}
+          <span class="cat{% if i.due_state == 'due_later' %} due-later{% elif i.due_state == 'past_due' %} past-due{% endif %}"
+                title="{% if i.due_state == 'past_due' %}past due {{ i.due_label }}{% elif i.due_state == 'due_later' %}due {{ i.due_label }}{% else %}no due date{% endif %}">{{ i.category }}</span>
+          {% endif %}
           {% if i.is_test %}<span class="test-star" aria-label="Test">&#9733;</span>{% endif %}
           {{ i.title }}
           {% if i.incomplete %}<span class="fixby">incomplete</span>{% endif %}

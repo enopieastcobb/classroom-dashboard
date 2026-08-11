@@ -452,6 +452,13 @@ class DataProcessor:
             "posted_label": posted.strftime('%b %-d') if posted else '',
             "month_label": posted.strftime('%b %Y') if posted else '',
             "due_label": due.strftime('%b %-d') if due else '',
+            # Drives the colour of the C/H badge: red once the due date has
+            # passed, green while there's still time, neutral when the item
+            # isn't owed any more (done) or carries no due date at all.
+            "due_state": (
+                '' if (done or not due)
+                else ('past_due' if due < date.today() else 'due_later')
+            ),
             # Sortable form, so items can be ordered most-urgent-first within
             # a priority tier. Undated sorts last.
             "due_key": due.isoformat() if due else '9999-12-31',
