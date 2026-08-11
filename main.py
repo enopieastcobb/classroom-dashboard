@@ -430,10 +430,17 @@ class DataProcessor:
         due = DataProcessor._due(meta)
         posted = DataProcessor._posted(meta)
         done = status in ('done', 'submitted')
-        # TURNED_IN only. RETURNED means the grader handed the work BACK to the
-        # student, so it is active again -- that is precisely how a FIC arises,
-        # and dropping it would hide the very thing this screen is for.
-        turned_in = (sub or {}).get('state') == 'TURNED_IN'
+        # "With the grader", i.e. nothing for the student to do right now.
+        #
+        # Only work that is TURNED_IN and ungraded qualifies. A FIC reaches the
+        # student one of two ways -- RETURNED to them, or GRADED and sent back
+        # to rework -- and while it sits in Classwork or Homework it is still
+        # owed either way. So a grade does NOT mean finished here: it means the
+        # grader has looked at it, and if it's still in Classwork/Homework the
+        # student has to work it again.
+        _state = (sub or {}).get('state')
+        _graded = (sub or {}).get('assignedGrade') is not None
+        turned_in = (_state == 'TURNED_IN') and not _graded
 
         materials = meta.get('materials') or []
         material = ''
