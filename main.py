@@ -476,6 +476,12 @@ class DataProcessor:
             "max_points": meta.get('maxPoints'),
             "late": bool((sub or {}).get('late')),
             "submission_state": (sub or {}).get('state') or '',
+            # Has the student actually handed it in? Status is driven by the
+            # topic, but a student can turn work in before the grader moves it
+            # out of Classwork -- in which case the topic still says "not done"
+            # while the work is in fact submitted. This keeps it off the
+            # teacher's action list without disturbing the topic-based status.
+            "turned_in": (sub or {}).get('state') in ('TURNED_IN', 'RETURNED'),
         }
 
     # Strands kept off this screen entirely. "Problem of the Day" is tracked
@@ -556,17 +562,37 @@ class DataProcessor:
         return {'C': 0, 'H': 1}.get(item.get("category"), 2)
 
     @staticmethod
+    def _is_outstanding(item: Dict[str, Any]) -> bool:
+        """
+        Whether the student still owes this, i.e. whether it belongs on the
+        teacher's session list.
+
+        A FIC always does -- it was turned in, graded, and sent back because
+        it needs reworking in class, which is the very thing this screen
+        exists to surface. Anything else the student has already handed in
+        does not, even if the grader hasn't moved it out of Classwork yet.
+        """
+        if item["status"] == 'fic':
+            return True
+        if item["status"] != 'notdone':
+            return False
+        return not item.get("turned_in")
+
+    @staticmethod
     def todo(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Outstanding work only: all Classwork first, then all Homework, and
         within each section FIC -> INC -> past due -> due later, then by due
         date so the most urgent leads its group.
 
+        Turned-in work drops off here but stays in the progress grid, which is
+        the full record.
+
         This deliberately replaces progress.js todo(), which had only two
         tiers, ignored the section, and put not-started work ahead of FICs.
         """
         return sorted(
-            (i for i in items if i["status"] in ('fic', 'notdone')),
+            (i for i in items if DataProcessor._is_outstanding(i)),
             key=lambda i: (
                 DataProcessor._section_rank(i),
                 DataProcessor.priority(i),
