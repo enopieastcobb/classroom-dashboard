@@ -634,14 +634,13 @@ class DataProcessor:
         Whether the student still owes this, i.e. whether it belongs on the
         teacher's session list.
 
-        A FIC always does -- it was turned in, graded, and sent back because
-        it needs reworking in class, which is the very thing this screen
-        exists to surface. Anything else the student has already handed in
-        does not, even if the grader hasn't moved it out of Classwork yet.
+        Work sitting in To Be Graded or Graded is finished. Anything else the
+        student has handed back is with the grader and needs nothing in class
+        right now -- and that includes a FIC: once it has been turned in there
+        is nothing to rework this session, even though the .fic tag stays in
+        the title forever.
         """
-        if item["status"] == 'fic':
-            return True
-        if item["status"] != 'notdone':
+        if item["status"] not in ('notdone', 'fic'):
             return False
         return not item.get("turned_in")
 
