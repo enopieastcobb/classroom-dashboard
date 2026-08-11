@@ -822,7 +822,7 @@ def _verify_and_get_email(id_token: str) -> str:
     return teacher_email
 
 
-ROOM_LABEL = {"English": "English Room", "Math": "Maths Room", "Weenopi": "Weenopi"}
+ROOM_LABEL = {"English": "English Room", "Math": "Math Room", "Weenopi": "Weenopi"}
 
 # Walk-ins aren't on any teacher's scheduled list, so they get their own group.
 WALKIN_GROUP = "Walk-ins"

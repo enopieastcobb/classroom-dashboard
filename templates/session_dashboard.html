@@ -16,6 +16,15 @@
     padding:12px 14px; font-size:14px; outline:none;
   }
   .searchbar input:focus { background:#fff; border-color:#111827; }
+  /* Solid dark fill so it reads as the primary action rather than fading into
+     the search fields beside it. */
+  .add-student-btn {
+    white-space:nowrap; background:#111827; color:#fff; border:1px solid #111827;
+    border-radius:10px; padding:12px 18px; font-size:14px; font-weight:600;
+    cursor:pointer; -webkit-appearance:none; appearance:none;
+  }
+  .add-student-btn:hover { background:#000; }
+  .add-student-btn:active { transform:translateY(1px); }
 
   .group { display:flex; gap:10px; margin-bottom:22px; align-items:stretch; }
   .group-tab {
@@ -71,10 +80,17 @@
     .test-star { animation:none; opacity:1; }
   }
   .badge.is-test { border-color:#ED1C24; }
-  .hidden-note {
-    font-size:11px; color:#9ca3af; margin-top:6px; cursor:help;
-    border-bottom:1px dotted #d1d5db; display:inline-block;
+  .hidden-note { font-size:11px; color:#6b7280; margin-top:8px; }
+  .hidden-note summary {
+    cursor:pointer; display:inline-block; padding:3px 8px; border-radius:6px;
+    background:#f3f4f6; border:1px solid #e5e7eb; color:#4b5563;
+    /* A comfortable tap target on a tablet. */
+    min-height:22px; line-height:16px;
   }
+  .hidden-note summary:hover { background:#e9ebee; }
+  .hidden-note ul { margin:8px 0 0; padding-left:18px; }
+  .hidden-note li { margin:3px 0; color:#6b7280; }
+  .hidden-note .ht { color:#374151; font-weight:600; }
   .badge .fixby { font-size:10px; opacity:.85; margin-left:6px; }
   .badge .cat {
     position:absolute; left:-8px; top:-8px; width:18px; height:18px; border-radius:50%;
@@ -155,7 +171,7 @@
     <datalist id="allStudents">
       {% for n in all_students %}<option value="{{ n }}"></option>{% endfor %}
     </datalist>
-    <button type="submit" class="btn" style="white-space:nowrap;">+ Add Student</button>
+    <button type="submit" class="add-student-btn">+ Add Student</button>
   </form>
 </div>
 
@@ -241,9 +257,16 @@
         {% endfor %}
         {% if s.hidden %}
         <div style="flex-basis:100%;">
-          <span class="hidden-note"
-                title="{% for hd in s.hidden %}{{ hd.title }} — {{ hd.reason }}
-{% endfor %}">{{ s.hidden | length }} assignment{{ 's' if s.hidden|length != 1 }} not shown (hover to see why)</span>
+          <!-- <details> rather than a title tooltip: this is used on an iPad,
+               where hover doesn't exist. Native, tap-friendly, needs no JS. -->
+          <details class="hidden-note">
+            <summary>{{ s.hidden | length }} assignment{{ 's' if s.hidden|length != 1 }} not shown</summary>
+            <ul>
+              {% for hd in s.hidden %}
+              <li><span class="ht">{{ hd.title }}</span> — {{ hd.reason }}</li>
+              {% endfor %}
+            </ul>
+          </details>
         </div>
         {% endif %}
       </div>
@@ -315,7 +338,7 @@
       </div>
       <div class="subj-toggle">
         <button type="button" class="active" data-subj="English" data-for="{{ s.slug }}">english</button>
-        <button type="button" data-subj="Math" data-for="{{ s.slug }}">maths</button>
+        <button type="button" data-subj="Math" data-for="{{ s.slug }}">math</button>
       </div>
     </div>
 
