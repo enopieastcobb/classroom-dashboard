@@ -613,6 +613,22 @@ class DataProcessor:
         return {'C': 0, 'H': 1}.get(item.get("category"), 2)
 
     @staticmethod
+    def not_outstanding_reason(item: Dict[str, Any]) -> str:
+        """
+        Why a real assignment isn't on the action list. Kept separate from
+        hidden_reason, which covers things that were never work at all.
+        """
+        if DataProcessor._is_outstanding(item):
+            return ""
+        if item["status"] == 'submitted':
+            return "in To Be Graded — with the grader"
+        if item["status"] == 'done':
+            return "in Graded — finished"
+        if item.get("turned_in"):
+            return "turned in and not yet graded — with the grader"
+        return "not currently outstanding"
+
+    @staticmethod
     def _is_outstanding(item: Dict[str, Any]) -> bool:
         """
         Whether the student still owes this, i.e. whether it belongs on the
@@ -1110,14 +1126,24 @@ async def classroom_dashboard(request: Request):
             DataProcessor.mark_superseded_pods(items)
 
             shown = [i for i in items if DataProcessor.is_trackable(i)]
-            # Anything withheld is reported on the card with the reason, so a
-            # newly-added assignment that doesn't appear can be explained
-            # instead of looking like the page is stale.
-            card["hidden"] = [
-                {"title": i["title"], "reason": DataProcessor.hidden_reason(i)}
-                for i in items if not DataProcessor.is_trackable(i)
-                and i["subject"] == sel_subject
-            ]
+
+            # Account for EVERY item in this room that isn't on the badges.
+            # Two different things can withhold one: the non-work filters
+            # (guide / announcement / superseded POD), or being finished or
+            # with the grader. Items dropped for the second reason used to
+            # vanish with no trace at all, which is how a real assignment
+            # could disappear without even appearing in this list.
+            on_badges = {id(i) for i in DataProcessor.todo(
+                [i for i in shown if i["subject"] == sel_subject])}
+            card["hidden"] = []
+            for i in items:
+                if i["subject"] != sel_subject or id(i) in on_badges:
+                    continue
+                reason = DataProcessor.hidden_reason(i)
+                if not reason:
+                    reason = DataProcessor.not_outstanding_reason(i)
+                if reason:
+                    card["hidden"].append({"title": i["title"], "reason": reason})
 
             # Ground truth for "why is this on my list?" -- the raw topic and
             # submission state Classroom actually returned, per item.
