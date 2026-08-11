@@ -261,6 +261,31 @@
           <span style="font-size:13px; color:#9ca3af; align-self:center;">Nothing outstanding.</span>
           {% endif %}
         {% endfor %}
+        {% if s.subs_error %}
+        <div style="flex-basis:100%;">
+          <p style="font-size:11px; color:#8a2020; margin:8px 0 0;">
+            Couldn't read submissions from Classroom, so scores and turned-in status
+            are missing for this student — {{ s.subs_error }}
+          </p>
+        </div>
+        {% endif %}
+        {% if s.diag %}
+        <div style="flex-basis:100%;">
+          <details class="hidden-note">
+            <summary>What Classroom returned ({{ s.diag | length }})</summary>
+            <ul>
+              {% for d in s.diag %}
+              <li>
+                <span class="ht">{{ d.title }}</span> —
+                topic <b>{{ d.topic }}</b> · submission <b>{{ d.sub_state }}</b> ·
+                turned in <b>{{ 'yes' if d.turned_in else 'no' }}</b> ·
+                status <b>{{ d.status }}</b> · due {{ d.due }}
+              </li>
+              {% endfor %}
+            </ul>
+          </details>
+        </div>
+        {% endif %}
         {% if s.hidden %}
         <div style="flex-basis:100%;">
           <!-- <details> rather than a title tooltip: this is used on an iPad,

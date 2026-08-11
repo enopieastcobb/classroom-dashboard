@@ -788,7 +788,7 @@ class ClassroomService:
             by_cw.setdefault(s.get('courseWorkId'), s)
         return by_cw
 
-    def load_student(self, course_id: str) -> List[Dict[str, Any]]:
+    def load_student(self, course_id: str) -> "tuple[List[Dict[str, Any]], str]":
         """
         All assignment items for one student's Classroom course.
 
@@ -816,22 +816,31 @@ class ClassroomService:
                 # this one is fatal for the student -- let it surface.
                 logger.error(f"Course {course_id}: could not load topics ({e}).")
                 raise
+            subs_error = ''
             try:
                 subs_by_cw = f_subs.result()
             except Exception as e:
-                # Scores are enrichment -- losing them must not lose the items.
-                logger.warning(f"Course {course_id}: could not load submissions ({e}); scores omitted.")
+                # Losing submissions must not lose the items -- but it silently
+                # costs every score AND the turned-in flag, so it is reported
+                # back rather than left as a log line nobody reads.
+                logger.warning(f"Course {course_id}: could not load submissions ({e}).")
                 subs_by_cw = {}
+                subs_error = f"{type(e).__name__}: {e}"
 
         if not assignments:
-            return []
+            return [], subs_error
         # Returns EVERY item, unfiltered. The caller decides what to show, so
         # that anything held back can be reported rather than disappearing --
         # "my new assignment isn't showing" has to be answerable from the page.
-        return [
+        items = [
             DataProcessor.build_item(a, topic_by_id, subs_by_cw.get(a.get('id')))
             for a in assignments
         ]
+        logger.info(
+            f"Course {course_id}: {len(items)} items, {len(subs_by_cw)} submissions matched, "
+            f"{sum(1 for i in items if i['turned_in'])} turned in."
+        )
+        return items, subs_error
 
 
 def _normalize_name(name: str) -> str:
@@ -1068,6 +1077,7 @@ async def classroom_dashboard(request: Request):
                 "grade": "", "todo": [], "counts": DataProcessor.counts([]),
                 "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
                 "state": "ok", "load_error": "", "hidden": [],
+                "subs_error": "", "diag": [],
             }
             course = find_course_for_student(courses, name)
             if not course:
@@ -1075,7 +1085,7 @@ async def classroom_dashboard(request: Request):
                 return card
             card["grade"] = split_course_name(course.get("name", "")).get("grade", "")
             try:
-                items = classroom_svc.load_student(course["id"])
+                items, card["subs_error"] = classroom_svc.load_student(course["id"])
             except Exception as student_err:
                 logger.error(
                     f"Failed to load Classroom data for '{name}' "
@@ -1097,6 +1107,17 @@ async def classroom_dashboard(request: Request):
                 for i in items if not DataProcessor.is_trackable(i)
                 and i["subject"] == sel_subject
             ]
+
+            # Ground truth for "why is this on my list?" -- the raw topic and
+            # submission state Classroom actually returned, per item.
+            card["diag"] = [{
+                "title": i["title"],
+                "topic": i["topic"],
+                "sub_state": i["submission_state"] or "(no submission record)",
+                "turned_in": i["turned_in"],
+                "status": i["status"],
+                "due": i["due_label"] or "(none)",
+            } for i in items if i["subject"] == sel_subject]
 
             subject_items = [i for i in shown if i["subject"] == sel_subject]
             card["todo"] = DataProcessor.todo(subject_items)
