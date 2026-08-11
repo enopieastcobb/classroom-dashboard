@@ -430,6 +430,7 @@ class DataProcessor:
         due = DataProcessor._due(meta)
         posted = DataProcessor._posted(meta)
         done = status in ('done', 'submitted')
+        turned_in = (sub or {}).get('state') in ('TURNED_IN', 'RETURNED')
 
         materials = meta.get('materials') or []
         material = ''
@@ -457,12 +458,17 @@ class DataProcessor:
             "posted_label": posted.strftime('%b %-d') if posted else '',
             "month_label": posted.strftime('%b %Y') if posted else '',
             "due_label": due.strftime('%b %-d') if due else '',
-            # Drives the colour of the C/H badge: red once the due date has
-            # passed, green while there's still time, neutral when the item
-            # isn't owed any more (done) or carries no due date at all.
+            # Drives the colour of the C/H badge, as a traffic light:
+            #   red    past due
+            #   orange due TODAY -- set last class and owed in this one, the
+            #          thing a teacher has to act on while the student is here
+            #   green  due beyond today, so there is still time
+            # Neutral when nothing is owed: already handed in, or no due date.
             "due_state": (
-                '' if (done or not due)
-                else ('past_due' if due < date.today() else 'due_later')
+                '' if (done or turned_in or not due)
+                else 'past_due' if due < date.today()
+                else 'due_today' if due == date.today()
+                else 'due_later'
             ),
             # Sortable form, so items can be ordered most-urgent-first within
             # a priority tier. Undated sorts last.
@@ -486,7 +492,7 @@ class DataProcessor:
             # out of Classwork -- in which case the topic still says "not done"
             # while the work is in fact submitted. This keeps it off the
             # teacher's action list without disturbing the topic-based status.
-            "turned_in": (sub or {}).get('state') in ('TURNED_IN', 'RETURNED'),
+            "turned_in": turned_in,
         }
 
     # Strands kept off this screen entirely.
@@ -570,13 +576,15 @@ class DataProcessor:
     @staticmethod
     def priority(item: Dict[str, Any]) -> int:
         """
-        Urgency tier, in the order teachers work a session:
+        Urgency tier, in the order teachers work a session. Deliberately mirrors
+        the C/H badge colours so the ordering and the colours say the same thing.
 
           0  FIC       - turned in, graded, too many mistakes: must be reworked
                          with the student in class. The alert condition.
           1  INC       - came back incomplete
-          2  Past due  - owed and the due date has gone by
-          3  Due later - due today or in future
+          2  Past due  - owed and the due date has gone by      (red)
+          3  Due today - set last class, owed in this one       (orange)
+          4  Due later - still has time                          (green)
         """
         if item["status"] == 'fic':
             return 0
@@ -584,7 +592,9 @@ class DataProcessor:
             return 1
         if item["overdue"]:
             return 2
-        return 3
+        if item["due_state"] == 'due_today':
+            return 3
+        return 4
 
     @staticmethod
     def _section_rank(item: Dict[str, Any]) -> int:

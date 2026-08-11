@@ -101,9 +101,10 @@
     /* Sits on top of the badge it labels, and of any badge beside it. */
     box-shadow:0 0 0 2px #fff; z-index:2;
   }
-  /* The C/H badge carries the due signal: green while there's still time,
-     red once the date has gone by. Neutral when nothing is owed. */
+  /* The C/H badge is a traffic light: green there's still time, orange due
+     today, red already past. Neutral when nothing is owed. */
   .badge .cat.due-later { background:#1E8E3E; }
+  .badge .cat.due-today { background:#E8710A; }
   .badge .cat.past-due  { background:#D93025; }
 
   .overlay {
@@ -230,8 +231,9 @@
         {% for i in s.todo %}
         {% set body %}
           {% if i.category %}
-          <span class="cat{% if i.due_state == 'due_later' %} due-later{% elif i.due_state == 'past_due' %} past-due{% endif %}"
-                title="{% if i.due_state == 'past_due' %}past due {{ i.due_label }}{% elif i.due_state == 'due_later' %}due {{ i.due_label }}{% else %}no due date{% endif %}">{{ i.category }}</span>
+          {% set due_class = {'due_later': ' due-later', 'due_today': ' due-today', 'past_due': ' past-due'}.get(i.due_state, '') %}
+          {% set due_hint = {'due_later': 'due ' ~ i.due_label, 'due_today': 'due TODAY (' ~ i.due_label ~ ')', 'past_due': 'past due ' ~ i.due_label}.get(i.due_state, 'no due date') %}
+          <span class="cat{{ due_class }}" title="{{ due_hint }}">{{ i.category }}</span>
           {% endif %}
           {% if i.is_test %}<span class="test-star" aria-label="Test">&#9733;</span>{% endif %}
           {{ i.title }}
