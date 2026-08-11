@@ -420,6 +420,11 @@ class DataProcessor:
         topic_name = topic_by_id.get(meta.get('topicId')) or ''
         subject, topic, category = DataProcessor._subject_and_topic(topic_name, title)
         strand = DataProcessor.parse_strand(title)
+        # Problem of the Day is Maths classwork wherever it happens to be
+        # filed, so the strand overrides whatever the topic name implied.
+        if strand["code"] == 'POD':
+            subject = 'Math'
+            category = 'C'
         status = DataProcessor._status(topic_name, title)
 
         due = DataProcessor._due(meta)
@@ -484,9 +489,30 @@ class DataProcessor:
             "turned_in": (sub or {}).get('state') in ('TURNED_IN', 'RETURNED'),
         }
 
-    # Strands kept off this screen entirely. "Problem of the Day" is tracked
-    # separately for now -- dropping 'POD' from this set brings it straight back.
-    EXCLUDED_STRAND_CODES = {'POD'}
+    # Strands kept off this screen entirely.
+    EXCLUDED_STRAND_CODES: set = set()
+
+    @staticmethod
+    def mark_superseded_pods(items: List[Dict[str, Any]]) -> None:
+        """
+        Only ONE Problem of the Day belongs on screen: the next one still owed,
+        i.e. the earliest with a due date of today or later.
+
+        They're issued as a long running series ("Problem of the Day 28, 29,
+        30..."), so without this a student's card fills with every past one and
+        buries the work that actually matters. Marks the rest in place.
+        """
+        pods = [i for i in items if i["strand_code"] == 'POD']
+        if not pods:
+            return
+        today_key = date.today().isoformat()
+        upcoming = sorted(
+            (p for p in pods if p["due_label"] and p["due_key"] >= today_key),
+            key=lambda p: p["due_key"],
+        )
+        keep = upcoming[0] if upcoming else None
+        for p in pods:
+            p["pod_superseded"] = p is not keep
 
     # Reference material the grader posts for lookup, not to be worked:
     # "Proof Reading Guide", "DGP Gr2 Guide".
@@ -499,7 +525,9 @@ class DataProcessor:
     def hidden_reason(item: Dict[str, Any]) -> str:
         """Why an item is being withheld, phrased for the person who wrote it."""
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
-            return "Problem of the Day (tracked separately)"
+            return "excluded strand"
+        if item.get("pod_superseded"):
+            return "superseded Problem of the Day (only the next one is shown)"
         if DataProcessor.ANNOUNCEMENT_RE.search(item.get("topic") or ''):
             return "posted under Announcements, not an assignment"
         if DataProcessor.REFERENCE_RE.search(item["title"] or ''):
@@ -511,10 +539,10 @@ class DataProcessor:
         """
         Whether an item belongs on this screen.
 
-        Published work is shown unless it is one of three things that aren't
-        work at all: filed under an Announcement topic (a notice), reference
-        material with "guide" in the title, or Problem of the Day (excluded by
-        explicit decision while it's tracked elsewhere).
+        Published work is shown unless it isn't work at all: filed under an
+        Announcement topic (a notice), reference material with "guide" in the
+        title, or a Problem of the Day that a later one has superseded (see
+        mark_superseded_pods -- only the next one still owed is shown).
 
         A missing due date is NOT grounds for hiding anything: a teacher may
         assign real work and leave the date blank, and hiding it would mean a
@@ -522,6 +550,8 @@ class DataProcessor:
         here at all, since coursework is read PUBLISHED-only.
         """
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
+            return False
+        if item.get("pod_superseded"):
             return False
         if DataProcessor.ANNOUNCEMENT_RE.search(item.get("topic") or ''):
             return False
@@ -1043,6 +1073,10 @@ async def classroom_dashboard(request: Request):
                 card["state"] = "error"
                 card["load_error"] = f"{type(student_err).__name__}: {student_err}"
                 return card
+
+            # Needs the whole set to decide which Problem of the Day survives,
+            # so it runs before anything is filtered out.
+            DataProcessor.mark_superseded_pods(items)
 
             shown = [i for i in items if DataProcessor.is_trackable(i)]
             # Anything withheld is reported on the card with the reason, so a
