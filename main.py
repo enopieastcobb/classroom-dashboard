@@ -482,37 +482,39 @@ class DataProcessor:
     # separately for now -- dropping 'POD' from this set brings it straight back.
     EXCLUDED_STRAND_CODES = {'POD'}
 
+    # Reference material the grader posts for lookup, not to be worked:
+    # "Proof Reading Guide", "DGP Gr2 Guide".
+    REFERENCE_RE = re.compile(r'\bguides?\b', re.IGNORECASE)
+
     @staticmethod
     def hidden_reason(item: Dict[str, Any]) -> str:
         """Why an item is being withheld, phrased for the person who wrote it."""
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
             return "Problem of the Day (tracked separately)"
-        if 'homework' not in (item.get("topic") or '').lower() and not item["due_label"]:
-            return "no due date set"
+        if DataProcessor.REFERENCE_RE.search(item["title"] or ''):
+            return 'reference material ("guide" in the title)'
         return ""
 
     @staticmethod
     def is_trackable(item: Dict[str, Any]) -> bool:
         """
-        Whether an item is real assignable work belonging on this screen.
+        Whether an item belongs on this screen.
 
-        Everything in Homework is real assigned work and is ALWAYS kept, due
-        date or not -- a teacher may set an essay with no date on it, and that
-        is still work the student owes.
+        Published work is shown unless it is explicitly reference material --
+        a title carrying the word "guide". A missing due date is NOT grounds
+        for hiding anything: a teacher may assign real work and leave the date
+        blank, and hiding it would mean a student's work never reaches the
+        teacher's list. Drafts never arrive here at all, since coursework is
+        read PUBLISHED-only.
 
-        Elsewhere, no due date means it isn't owed: reference material ("Proof
-        Reading Guide", "DGP Gr2 Guide") and notices ("Summer Hours for 2026")
-        sit in a Classwork topic with no due date and would otherwise read as
-        permanently "not done", padding every alert list.
-
-        Hard-copy handouts ("G-4 HC") DO carry a due date -- the physical book
-        is due back the following week -- so they are tracked work regardless.
+        Problem of the Day is the one other exclusion, by explicit decision
+        while it's tracked elsewhere.
         """
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
             return False
-        if 'homework' in (item.get("topic") or '').lower():
-            return True
-        return bool(item["due_label"])
+        if DataProcessor.REFERENCE_RE.search(item["title"] or ''):
+            return False
+        return True
 
     @staticmethod
     def counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
