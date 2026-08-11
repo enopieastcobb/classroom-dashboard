@@ -486,11 +486,16 @@ class DataProcessor:
     # "Proof Reading Guide", "DGP Gr2 Guide".
     REFERENCE_RE = re.compile(r'\bguides?\b', re.IGNORECASE)
 
+    # Anything filed under an Announcement topic is a notice, not work.
+    ANNOUNCEMENT_RE = re.compile(r'announcement', re.IGNORECASE)
+
     @staticmethod
     def hidden_reason(item: Dict[str, Any]) -> str:
         """Why an item is being withheld, phrased for the person who wrote it."""
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
             return "Problem of the Day (tracked separately)"
+        if DataProcessor.ANNOUNCEMENT_RE.search(item.get("topic") or ''):
+            return "posted under Announcements, not an assignment"
         if DataProcessor.REFERENCE_RE.search(item["title"] or ''):
             return 'reference material ("guide" in the title)'
         return ""
@@ -500,17 +505,19 @@ class DataProcessor:
         """
         Whether an item belongs on this screen.
 
-        Published work is shown unless it is explicitly reference material --
-        a title carrying the word "guide". A missing due date is NOT grounds
-        for hiding anything: a teacher may assign real work and leave the date
-        blank, and hiding it would mean a student's work never reaches the
-        teacher's list. Drafts never arrive here at all, since coursework is
-        read PUBLISHED-only.
+        Published work is shown unless it is one of three things that aren't
+        work at all: filed under an Announcement topic (a notice), reference
+        material with "guide" in the title, or Problem of the Day (excluded by
+        explicit decision while it's tracked elsewhere).
 
-        Problem of the Day is the one other exclusion, by explicit decision
-        while it's tracked elsewhere.
+        A missing due date is NOT grounds for hiding anything: a teacher may
+        assign real work and leave the date blank, and hiding it would mean a
+        student's work never reaches the teacher's list. Drafts never arrive
+        here at all, since coursework is read PUBLISHED-only.
         """
         if item["strand_code"] in DataProcessor.EXCLUDED_STRAND_CODES:
+            return False
+        if DataProcessor.ANNOUNCEMENT_RE.search(item.get("topic") or ''):
             return False
         if DataProcessor.REFERENCE_RE.search(item["title"] or ''):
             return False
