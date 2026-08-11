@@ -442,6 +442,14 @@ class DataProcessor:
         _graded = (sub or {}).get('assignedGrade') is not None
         turned_in = (_state == 'TURNED_IN') and not _graded
 
+        _max = meta.get('maxPoints')
+        score_percent = None
+        if _graded and _max:
+            try:
+                score_percent = round(float(sub['assignedGrade']) / float(_max) * 100)
+            except (TypeError, ValueError, ZeroDivisionError):
+                score_percent = None
+
         materials = meta.get('materials') or []
         material = ''
         if materials:
@@ -495,6 +503,13 @@ class DataProcessor:
             "score": (sub or {}).get('assignedGrade'),
             "draft_score": (sub or {}).get('draftGrade'),
             "max_points": meta.get('maxPoints'),
+            "score_percent": score_percent,
+            # Graded but under the pass mark: marked, yet not mastered, so the
+            # student still has to rework it.
+            "below_passing": (
+                score_percent is not None
+                and score_percent < DataProcessor.PASSING_PERCENT
+            ),
             "late": bool((sub or {}).get('late')),
             "submission_state": (sub or {}).get('state') or '',
             # Is the work currently with the grader? Status is driven by the
@@ -537,6 +552,11 @@ class DataProcessor:
 
     # Anything filed under an Announcement topic is a notice, not work.
     ANNOUNCEMENT_RE = re.compile(r'announcement', re.IGNORECASE)
+
+    # The centre's pass mark. A graded item below this hasn't been mastered,
+    # so it still needs reworking with the student even though it carries a
+    # grade -- the same signal a FIC gives, arrived at by score.
+    PASSING_PERCENT = 80
 
     @staticmethod
     def hidden_reason(item: Dict[str, Any]) -> str:

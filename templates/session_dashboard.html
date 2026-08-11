@@ -94,6 +94,14 @@
   .hidden-note li { margin:3px 0; color:#6b7280; }
   .hidden-note .ht { color:#374151; font-weight:600; }
   .badge .fixby { font-size:10px; opacity:.85; margin-left:6px; }
+  /* The mark, so a teacher sees it without opening anything. Under the pass
+     mark it reads as an alert: graded, but not mastered. */
+  .badge .score {
+    font-size:11px; font-weight:700; margin-left:7px; padding:1px 6px;
+    border-radius:5px; background:#e8eaed; color:#3c4043;
+  }
+  .badge .score.under { background:#D93025; color:#fff; }
+  .badge.notdone .score.under, .badge.done .score.under { background:#D93025; color:#fff; }
   .badge .cat {
     position:absolute; left:-11px; top:-11px; width:26px; height:26px; border-radius:50%;
     background:#111827; color:#fff; font-size:14px; font-weight:700; line-height:1;
@@ -237,6 +245,9 @@
           {% endif %}
           {% if i.is_test %}<span class="test-star" aria-label="Test">&#9733;</span>{% endif %}
           {{ i.title }}
+          {% if i.score_percent is not none %}
+          <span class="score{% if i.below_passing %} under{% endif %}">{{ i.score_percent }}%</span>
+          {% endif %}
           {% if i.incomplete %}<span class="fixby">incomplete</span>{% endif %}
           {% if i.fix_by %}<span class="fixby">fix {{ i.fix_by }}</span>{% endif %}
         {% endset %}
