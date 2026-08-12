@@ -1149,7 +1149,7 @@ async def classroom_dashboard(request: Request):
                 "grade": "", "todo": [], "counts": DataProcessor.counts([]),
                 "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
                 "state": "ok", "load_error": "", "hidden": [],
-                "subs_error": "", "diag": [],
+                "subs_error": "",
             }
             course = find_course_for_student(courses, name)
             if not course:
@@ -1171,9 +1171,9 @@ async def classroom_dashboard(request: Request):
             DataProcessor.mark_superseded_pods(items)
 
             # Work parked in a Graded topic is finished and out of scope for
-            # the session view -- it isn't listed as withheld or in the
-            # diagnostic either, because there is nothing to explain. The
-            # grids below still get the full set, since that IS the record.
+            # the session view -- not on the badges and not listed as withheld
+            # either, because there is nothing to explain. The grids below
+            # still get the full set, since that IS the record.
             session_items = [i for i in items if DataProcessor.in_session_scope(i)]
 
             shown = [i for i in session_items if DataProcessor.is_trackable(i)]
@@ -1196,16 +1196,16 @@ async def classroom_dashboard(request: Request):
                 if reason:
                     card["hidden"].append({"title": i["title"], "reason": reason})
 
-            # Ground truth for "why is this on my list?" -- the raw topic and
-            # submission state Classroom actually returned, per item.
-            card["diag"] = [{
-                "title": i["title"],
-                "topic": i["topic"],
-                "sub_state": i["submission_state"] or "(no submission record)",
-                "turned_in": i["turned_in"],
-                "status": i["status"],
-                "due": i["due_label"] or "(none)",
-            } for i in session_items if i["subject"] == sel_subject]
+            # The raw topic and submission state per item go to the log rather
+            # than onto the card: useful when something needs explaining, but
+            # meaningless to a teacher mid-session.
+            logger.info(
+                "course=%s items=%s | %s", course.get('id'), len(session_items),
+                " ; ".join(
+                    f"{i['title'][:40]}|{i['topic']}|{i['submission_state'] or 'no-sub'}"
+                    f"|{i['status']}" for i in session_items if i["subject"] == sel_subject
+                ),
+            )
 
             subject_items = [i for i in shown if i["subject"] == sel_subject]
             card["todo"] = DataProcessor.todo(subject_items)
