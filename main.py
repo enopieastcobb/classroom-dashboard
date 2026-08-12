@@ -281,10 +281,10 @@ class DataProcessor:
     STRAND_MAP = [
         (re.compile(r'\broots?\b|root words', re.I), 'Roots', 'Roots'),
         (re.compile(r'\bdgp\b', re.I), 'DGP', 'DGP'),
-        # Tolerant of the spellings that actually appear -- "Proble of the Day"
-        # is in the live data, and one missing letter must not turn a Maths
-        # item into an English one.
-        (re.compile(r'probl\w*\s+of\s+the\s+day', re.I), 'Problem of the Day', 'POD'),
+        # Anything starting "prob" and ending "of the Day" -- "Proble of the
+        # Day" is already in the live data, and one missing letter must not
+        # move a Maths item into the English room.
+        (re.compile(r'\bprob\w*\s+of\s+the\s+day', re.I), 'Problem of the Day', 'POD'),
         (re.compile(r'proof\s*reading|\bpr\b', re.I), 'Proof Reading', 'PR'),
         (re.compile(r'\bwriting\b|\bessay\b|\bwrite\b', re.I), 'Writing', 'Writing'),
         (re.compile(r'classic series|\bcs\b', re.I), 'Classic Series', 'CS'),
