@@ -440,7 +440,12 @@ class DataProcessor:
         # student has to work it again.
         _state = (sub or {}).get('state')
         _graded = (sub or {}).get('assignedGrade') is not None
-        turned_in = (_state == 'TURNED_IN') and not _graded
+        # TURNED_IN alone decides it, grade or no grade. A resubmission comes
+        # back as TURNED_IN while still carrying the PREVIOUS round's grade --
+        # Classroom shows that as "Resubmitted" with the old mark -- so the
+        # work is with the grader awaiting re-grading, not with the student.
+        # Treating a grade as "handed back" kept those on the list.
+        turned_in = _state == 'TURNED_IN'
 
         _max = meta.get('maxPoints')
         score_percent = None
@@ -671,7 +676,9 @@ class DataProcessor:
         if item["status"] == 'done':
             return "in Graded — finished"
         if item.get("turned_in"):
-            return "turned in and not yet graded — with the grader"
+            # Deliberately doesn't say "not yet graded": a resubmission is
+            # TURNED_IN while still carrying the previous round's mark.
+            return "turned in — with the grader"
         return "not currently outstanding"
 
     @staticmethod
