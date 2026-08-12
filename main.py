@@ -1165,7 +1165,14 @@ async def classroom_dashboard(request: Request):
             if not course:
                 card["state"] = "unmatched"
                 return card
-            card["grade"] = split_course_name(course.get("name", "")).get("grade", "")
+            # The class's Section field carries the grade and academic year
+            # verbatim -- "Gr 3 [2026-2027]" -- so it's shown as written rather
+            # than reformatted. Falls back to parsing the class name for any
+            # class that hasn't had a section set.
+            card["grade"] = (
+                (course.get("section") or "").strip()
+                or split_course_name(course.get("name", "")).get("grade", "")
+            )
             try:
                 items, card["subs_error"] = classroom_svc.load_student(course["id"])
             except Exception as student_err:
