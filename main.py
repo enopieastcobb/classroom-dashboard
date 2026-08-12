@@ -563,6 +563,22 @@ class DataProcessor:
     # Anything filed under an Announcement topic is a notice, not work.
     ANNOUNCEMENT_RE = re.compile(r'announcement', re.IGNORECASE)
 
+    # "Graded Assignments" is a TOPIC the grader moves finished work into --
+    # not the same thing as a submission carrying a grade. Work that has
+    # reached it is done with, so it is out of scope for the session view
+    # entirely: not on the badges, not in "assignments not shown", not in
+    # "What Classroom returned". It still appears in the progress grid, which
+    # is the full record.
+    GRADED_TOPIC_RE = re.compile(r'graded', re.IGNORECASE)
+
+    @staticmethod
+    def in_session_scope(item: Dict[str, Any]) -> bool:
+        """False for work parked in a Graded topic -- finished and out of scope."""
+        topic = item.get("topic") or ''
+        if DataProcessor.ANNOUNCEMENT_RE.search(topic):
+            return True  # announcements are reported as withheld, not dropped
+        return not DataProcessor.GRADED_TOPIC_RE.search(topic)
+
     # The centre's pass mark. A graded item below this hasn't been mastered,
     # so it still needs reworking with the student even though it carries a
     # grade -- the same signal a FIC gives, arrived at by score.
@@ -1154,7 +1170,13 @@ async def classroom_dashboard(request: Request):
             # so it runs before anything is filtered out.
             DataProcessor.mark_superseded_pods(items)
 
-            shown = [i for i in items if DataProcessor.is_trackable(i)]
+            # Work parked in a Graded topic is finished and out of scope for
+            # the session view -- it isn't listed as withheld or in the
+            # diagnostic either, because there is nothing to explain. The
+            # grids below still get the full set, since that IS the record.
+            session_items = [i for i in items if DataProcessor.in_session_scope(i)]
+
+            shown = [i for i in session_items if DataProcessor.is_trackable(i)]
 
             # Account for EVERY item in this room that isn't on the badges.
             # Two different things can withhold one: the non-work filters
@@ -1165,7 +1187,7 @@ async def classroom_dashboard(request: Request):
             on_badges = {id(i) for i in DataProcessor.todo(
                 [i for i in shown if i["subject"] == sel_subject])}
             card["hidden"] = []
-            for i in items:
+            for i in session_items:
                 if i["subject"] != sel_subject or id(i) in on_badges:
                     continue
                 reason = DataProcessor.hidden_reason(i)
@@ -1183,13 +1205,16 @@ async def classroom_dashboard(request: Request):
                 "turned_in": i["turned_in"],
                 "status": i["status"],
                 "due": i["due_label"] or "(none)",
-            } for i in items if i["subject"] == sel_subject]
+            } for i in session_items if i["subject"] == sel_subject]
 
             subject_items = [i for i in shown if i["subject"] == sel_subject]
             card["todo"] = DataProcessor.todo(subject_items)
             card["counts"] = DataProcessor.counts(subject_items)
+            # The grid is the full record, so it keeps the Graded topic --
+            # only the non-work filters apply here.
+            grid_items = [i for i in items if DataProcessor.is_trackable(i)]
             card["grids"] = {
-                s: DataProcessor.grid([i for i in shown if i["subject"] == s])
+                s: DataProcessor.grid([i for i in grid_items if i["subject"] == s])
                 for s in ("English", "Math")
             }
             return card
