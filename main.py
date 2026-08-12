@@ -450,6 +450,19 @@ class DataProcessor:
             except (TypeError, ValueError, ZeroDivisionError):
                 score_percent = None
 
+        below_passing = (
+            score_percent is not None
+            and score_percent < DataProcessor.PASSING_PERCENT
+        )
+        # A graded item under the pass mark, still sitting in Classwork or
+        # Homework and not with the grader, IS a fix-in-class -- marked, but
+        # not mastered. Promoting it to the fic status rather than tracking a
+        # parallel concept means the red badge, the top sort tier and the FIC
+        # count all follow on their own.
+        if status == 'notdone' and below_passing and not turned_in:
+            status = 'fic'
+            done = False
+
         materials = meta.get('materials') or []
         material = ''
         if materials:
@@ -506,10 +519,7 @@ class DataProcessor:
             "score_percent": score_percent,
             # Graded but under the pass mark: marked, yet not mastered, so the
             # student still has to rework it.
-            "below_passing": (
-                score_percent is not None
-                and score_percent < DataProcessor.PASSING_PERCENT
-            ),
+            "below_passing": below_passing,
             "late": bool((sub or {}).get('late')),
             "submission_state": (sub or {}).get('state') or '',
             # Is the work currently with the grader? Status is driven by the
