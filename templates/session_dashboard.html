@@ -10,6 +10,28 @@
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='white' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");
     background-repeat:no-repeat; background-position:right 12px center;
   }
+  /* Deliberately loud: the whole point is that it is noticed before the
+     child leaves. Pulses gently rather than flashing, so it draws the eye
+     without being unreadable. */
+  .handover-alert {
+    border:2px solid #D93025; background:#FEF2F1; border-radius:14px;
+    padding:14px 18px; margin:8px 0 18px;
+    animation: haPulse 2s ease-in-out infinite;
+  }
+  @keyframes haPulse {
+    0%, 100% { box-shadow:0 0 0 0 rgba(217,48,37,.35); }
+    50%      { box-shadow:0 0 0 8px rgba(217,48,37,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .handover-alert { animation:none; } }
+  .handover-alert .ha-head {
+    font-size:15px; font-weight:700; color:#8a2020; margin-bottom:8px;
+  }
+  .handover-alert ul { margin:0; padding-left:20px; }
+  .handover-alert li { font-size:14px; color:#3c2020; margin:5px 0; }
+  .handover-alert .ha-name { font-weight:700; }
+  .handover-alert .ha-books { font-weight:700; color:#D93025; }
+  .handover-alert .ha-foot { font-size:11px; color:#9a6b6b; margin:10px 0 0; }
+
   .searchbar { display:flex; gap:10px; margin-bottom:16px; }
   .searchbar input {
     flex:1; border:1px solid #e5e7eb; background:#f9fafb; border-radius:10px;
@@ -146,6 +168,19 @@
 {% endblock %}
 
 {% block content %}
+{% if handover_alert %}
+<div class="handover-alert" role="alert">
+  <div class="ha-head">Booklets not yet handed over — class ends soon</div>
+  <ul>
+    {% for a in handover_alert %}
+    <li><span class="ha-name">{{ a.name }}</span> did not receive
+      <span class="ha-books">{{ a.missing | join(', ') }}</span></li>
+    {% endfor %}
+  </ul>
+  <p class="ha-foot">This clears itself once the booklets are assigned in Classroom.</p>
+</div>
+{% endif %}
+
 {% if error %}
 <div class="card">
   <p style="color:#d93025; margin:0;">{{ error }}</p>

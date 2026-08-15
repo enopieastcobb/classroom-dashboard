@@ -20,6 +20,21 @@ from datetime import date, datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from schedule_service import ScheduleService
+from booklet_tracker import review_student
+
+# The centre's local clock. Cloud Run runs in UTC, so the handover window has
+# to be worked out in local time or it lands hours off.
+try:
+    from zoneinfo import ZoneInfo
+    CENTER_TZ = ZoneInfo("America/New_York")
+except Exception as e:  # pragma: no cover - missing tzdata
+    logging.getLogger(__name__).error(f"Timezone data unavailable ({e}); using UTC.")
+    CENTER_TZ = None
+
+# The booklet alert runs in the last ten minutes of the session: late enough
+# that a teacher has had the lesson to hand books over, early enough that it
+# can still be put right before the child leaves.
+HANDOVER_ALERT_FROM_MINUTE = 50
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -994,6 +1009,25 @@ WALKIN_GROUP = "Walk-ins"
 MAKEUP_GROUP = "Make-ups"
 
 
+def in_handover_window(session_time: str, session_date: Optional[date],
+                       now: Optional[datetime] = None) -> bool:
+    """
+    Whether we are in the last ten minutes of THIS session, on its own day.
+
+    Checking the date as well as the clock matters: the schedule repeats
+    weekly, so without it a Tuesday 5pm session would raise its alert every
+    weekday at 5:50.
+    """
+    now = now or (datetime.now(CENTER_TZ) if CENTER_TZ else datetime.now())
+    if session_date and now.date() != session_date:
+        return False
+    try:
+        start = datetime.strptime(session_time.strip(), "%I:%M %p")
+    except (ValueError, AttributeError):
+        return False
+    return now.hour == start.hour and now.minute >= HANDOVER_ALERT_FROM_MINUTE
+
+
 def _time_key(t: str) -> tuple:
     """Sort '9:00 AM' before '12:00 PM' before '3:00 PM'."""
     try:
@@ -1033,6 +1067,7 @@ async def classroom_dashboard(request: Request):
         "room_label": ROOM_LABEL,
         "walkins": walkins, "walkins_field": "|".join(walkins),
         "all_students": [], "upcoming_makeups": [], "session_date": "",
+        "handover_alert": [],
     }
 
     timings: Dict[str, float] = {}
@@ -1159,6 +1194,7 @@ async def classroom_dashboard(request: Request):
                 "grade": "", "todo": [], "counts": DataProcessor.counts([]),
                 "grids": {s: DataProcessor.grid([]) for s in ("English", "Math")},
                 "state": "ok", "load_error": "", "hidden": [],
+                "booklets": {"findings": [], "missing": []},
                 "subs_error": "",
             }
             course = find_course_for_student(courses, name)
@@ -1186,6 +1222,15 @@ async def classroom_dashboard(request: Request):
             # Needs the whole set to decide which Problem of the Day survives,
             # so it runs before anything is filtered out.
             DataProcessor.mark_superseded_pods(items)
+
+            # Booklet handover check. Runs on the UNFILTERED set, since the
+            # booklets it reasons about include work that never reaches the
+            # badges, and only for Maths -- booklets are a Maths idea.
+            if sel_subject == "Math":
+                try:
+                    card["booklets"] = review_student(items)
+                except Exception as e:
+                    logger.error(f"Booklet check failed for '{name}': {e}", exc_info=True)
 
             # Work parked in a Graded topic is finished and out of scope for
             # the session view -- not on the badges and not listed as withheld
@@ -1260,6 +1305,23 @@ async def classroom_dashboard(request: Request):
             "unmatched": sum(1 for c in cards if c["state"] == "unmatched"),
             "errors": sum(1 for c in cards if c["state"] == "error"),
         }
+        # Only raised in the last ten minutes of the session, so it reads as a
+        # last call before the child leaves rather than nagging all lesson --
+        # a teacher legitimately hands the booklets over at the end.
+        handover_alert = []
+        if in_handover_window(sel_time, session_date):
+            for c in cards:
+                if c["state"] != "ok":
+                    continue
+                missing = (c.get("booklets") or {}).get("missing") or []
+                if missing:
+                    handover_alert.append({"name": c["name"], "missing": missing})
+        if handover_alert:
+            logger.warning(
+                "HANDOVER ALERT %s %s %s: %s", sel_day, sel_time, sel_subject,
+                "; ".join(f"{a['name']} missing {', '.join(a['missing'])}"
+                          for a in handover_alert))
+
         timings['total'] = round(time.perf_counter() - t_request, 2)
         logger.info(f"{sel_day} {sel_subject} {sel_time}: {summary} timings={timings}")
 
@@ -1268,6 +1330,7 @@ async def classroom_dashboard(request: Request):
             "summary": summary,
             "timings": timings,
             "all_students": all_students,
+            "handover_alert": handover_alert,
             "upcoming_makeups": upcoming_view,
             "session_date": session_date.strftime('%a %b %-d') if session_date else '',
             "unmatched": [c["name"] for c in cards if c["state"] == "unmatched"],
