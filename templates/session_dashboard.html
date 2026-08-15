@@ -202,6 +202,14 @@
   <select name="time" class="pill" data-autosubmit>
     {% for t in times %}<option value="{{ t }}" {% if t == time %}selected{% endif %}>{{ t }}</option>{% endfor %}
   </select>
+  {% if time_override_enabled %}
+  <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#8a2020;
+                background:#FEF2F1; border:1px dashed #D93025; border-radius:8px; padding:6px 10px;">
+    pretend the time is
+    <input type="time" name="simulate_time" value="{{ simulate_time }}" data-autosubmit
+           style="font-size:12px; padding:2px 4px;">
+  </label>
+  {% endif %}
 </form>
 
 <div class="searchbar">

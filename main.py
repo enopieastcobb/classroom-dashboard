@@ -36,6 +36,13 @@ except Exception as e:  # pragma: no cover - missing tzdata
 # can still be put right before the child leaves.
 HANDOVER_ALERT_FROM_MINUTE = 50
 
+# TEMPORARY, for testing the handover alert without waiting for a live session.
+# Off unless ENABLE_TIME_OVERRIDE=1 is set on the service, so the control cannot
+# appear in normal use. Turn it off again with:
+#   gcloud run services update classroom-dashboard --region=us-east1 \
+#       --remove-env-vars ENABLE_TIME_OVERRIDE
+TIME_OVERRIDE_ENABLED = os.environ.get("ENABLE_TIME_OVERRIDE") == "1"
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1009,6 +1016,24 @@ WALKIN_GROUP = "Walk-ins"
 MAKEUP_GROUP = "Make-ups"
 
 
+def simulated_now(raw: str) -> Optional[datetime]:
+    """
+    A pretend clock for testing, as "HH:MM" on the centre's TODAY.
+
+    Only honoured when TIME_OVERRIDE_ENABLED, and it moves the clock only --
+    the session-date check still applies, so a simulated time still has to be
+    paired with a day that actually runs today.
+    """
+    if not (TIME_OVERRIDE_ENABLED and raw):
+        return None
+    try:
+        hh, mm = (int(p) for p in raw.strip().split(":")[:2])
+    except (ValueError, TypeError):
+        return None
+    today = datetime.now(CENTER_TZ) if CENTER_TZ else datetime.now()
+    return today.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+
 def in_handover_window(session_time: str, session_date: Optional[date],
                        now: Optional[datetime] = None) -> bool:
     """
@@ -1068,6 +1093,8 @@ async def classroom_dashboard(request: Request):
         "walkins": walkins, "walkins_field": "|".join(walkins),
         "all_students": [], "upcoming_makeups": [], "session_date": "",
         "handover_alert": [],
+        "time_override_enabled": TIME_OVERRIDE_ENABLED,
+        "simulate_time": (form_data.get("simulate_time") or "") if TIME_OVERRIDE_ENABLED else "",
     }
 
     timings: Dict[str, float] = {}
@@ -1309,7 +1336,10 @@ async def classroom_dashboard(request: Request):
         # last call before the child leaves rather than nagging all lesson --
         # a teacher legitimately hands the booklets over at the end.
         handover_alert = []
-        if in_handover_window(sel_time, session_date):
+        fake_now = simulated_now(form_data.get("simulate_time") or "")
+        if fake_now:
+            logger.warning(f"TIME OVERRIDE in use: pretending it is {fake_now:%Y-%m-%d %H:%M %Z}")
+        if in_handover_window(sel_time, session_date, fake_now):
             for c in cards:
                 if c["state"] != "ok":
                     continue
