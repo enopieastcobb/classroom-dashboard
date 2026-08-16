@@ -87,7 +87,13 @@ SWAPPABLE_LEVELS = frozenset({15, 16})
 
 # Levels 17 and 18 can run as two tracks at once. A child who has passed 15 or
 # 16 and is already doing advanced maths at school is put on both to catch up,
-# taking one booklet from each level per week rather than two from one.
+# working them side by side rather than one after the other.
+#
+# This is NOT the 15/16 swap. Those two are taken in either order, one then the
+# other; 17 and 18 run TOGETHER and never in reverse -- 18 is never taken first
+# and returned from. So this pair stays out of SWAPPABLE_LEVELS: a level-17
+# booklet issued after 18 has started means both tracks are live, not that the
+# child has dropped back to 17.
 #
 # That decision rests on how far ahead the child is AT SCHOOL, which is not in
 # Classroom. So the pair is DETECTED, never predicted: two tracks are read from
