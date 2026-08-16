@@ -180,11 +180,44 @@ def parse_booklet(title: str) -> Optional[Dict[str, Any]]:
             'labelled': bool(stated)}
 
 
-def next_booklet(level: int, book: int, series: str):
-    """The booklet that follows, rolling into the next level at the end."""
+def current_position(in_series: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    The booklet the student is actually working from -- the most RECENTLY
+    issued, not the highest numbered.
+
+    Levels are not always taken in order. A child in grade 3 or below who
+    reaches level 14 is often given level 16 (order of operations) before
+    level 15 (long division), because long division frustrates young children
+    and stalling there costs more than the sequence is worth. Ranking by level
+    number would read such a child as being on 16 when they have since moved
+    back to 15, and would then ask for the wrong booklets entirely.
+
+    Recency decides the LEVEL; within that level the furthest booklet decides
+    the position. Recency alone would misread a back-filled older booklet -- a
+    redo of 9-2 issued to a student already on 9-7 -- as a step backwards, and
+    demand booklets they finished weeks ago.
+    """
+    level = max(in_series, key=lambda b: (b['posted_key'], b['level']))['level']
+    return max((b for b in in_series if b['level'] == level),
+               key=lambda b: b['book'])
+
+
+def next_booklet(level: int, book: int, series: str, levels_done=()):
+    """
+    The booklet that follows, rolling into the next level at the end.
+
+    Levels the student has already worked are skipped on the way: a child who
+    took 16 before 15 should go from 15-18 to 17-1, not back through 16.
+    """
     last = BTM_LAST if series == 'BTM' else CTM_LAST
     first = BTM_FIRST if series == 'BTM' else CTM_FIRST
-    return (level, book + 1) if book < last else (level + 1, first)
+    if book < last:
+        return level, book + 1
+    level += 1
+    # Bounded: levels run to 24, so this cannot spin.
+    while level in levels_done and level <= 24:
+        level += 1
+    return level, first
 
 
 def _label(level: int, book: int) -> str:
@@ -287,7 +320,7 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     # weeks and then blocks the test.
     btm_seen = [b for b in booklets if b['series'] == 'BTM']
     if btm_seen:
-        current = max(btm_seen, key=lambda b: (b['level'], b['book']))
+        current = current_position(btm_seen)
         if current['book'] >= SUPP_EXPECTED_FROM_BOOK and not any(
                 s['level'] == current['level'] for s in supplements):
             findings.append({
@@ -318,31 +351,35 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         if shortfall <= 0:
             continue
 
-        # Walk forward from the furthest booklet the student has reached.
-        furthest = max(in_series, key=lambda b: (b['level'], b['book']))
-        level, book = furthest['level'], furthest['book']
+        # Walk forward from where the student is actually working -- the most
+        # recent booklet, not the highest numbered. Levels are taken out of
+        # order for younger children (see current_position), so the highest
+        # number can be a level they finished and have since moved on from.
+        pos = current_position(in_series)
+        level, book = pos['level'], pos['book']
+        levels_done = {b['level'] for b in in_series if b['level'] != pos['level']}
 
         # A failed level test can send specific booklets back to be redone.
         # Those take precedence over moving on: they are what should be
         # assigned, in the order the grader listed them, until they are done.
-        redo = _pending_redo(level_tests, furthest['level'], series, in_series)
+        redo = _pending_redo(level_tests, pos['level'], series, in_series)
         if redo:
             findings.append({
                 'series': series, 'kind': 'redo',
                 'expected': [_label(r['level'], r['book']) for r in redo[:shortfall]],
-                'detail': f"redo set after the level {furthest['level']} test",
+                'detail': f"redo set after the level {pos['level']} test",
             })
             continue
 
         expected = []
         for _ in range(shortfall):
-            level, book = next_booklet(level, book, series)
+            level, book = next_booklet(level, book, series, levels_done)
             # Crossing into a new level needs the level test passed first.
             # The supplementary packet and level test gate the BASIC THINKING
             # run: eighteen booklets plus the packet are what the level test
             # examines. Critical thinking rolls into the next level on its own.
-            if series == 'BTM' and book == BTM_FIRST and level > furthest['level']:
-                gate = _level_gate(level_tests, furthest["level"], supplements)
+            if series == 'BTM' and book == BTM_FIRST and level > pos['level']:
+                gate = _level_gate(level_tests, pos["level"], supplements)
                 if gate:
                     findings.append({'series': series, 'kind': gate['kind'],
                                      'expected': [], 'detail': gate['detail']})
