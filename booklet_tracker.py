@@ -81,6 +81,21 @@ SUPP_RE = re.compile(
 # check recognises. Silence would look like "all fine".
 BOOKLET_EXPECTED_UP_TO_GRADE = 5
 
+# The one pair that may be taken in either order, coming out of level 14.
+# See current_position.
+SWAPPABLE_LEVELS = frozenset({15, 16})
+
+# Levels 17 and 18 can run as two tracks at once. A child who has passed 15 or
+# 16 and is already doing advanced maths at school is put on both to catch up,
+# taking one booklet from each level per week rather than two from one.
+#
+# That decision rests on how far ahead the child is AT SCHOOL, which is not in
+# Classroom. So the pair is DETECTED, never predicted: two tracks are read from
+# the booklet history, and a child who should be on two but isn't cannot be
+# flagged from here. What the alert catches is a child already running both
+# tracks who was handed nothing for one of them.
+PARALLEL_LEVELS = (17, 18)
+
 # Once a child is this far into a level's basic thinking run, the level's
 # supplementary packet should already have been issued. Catching it here means
 # it is raised while there is a whole level left to work through, rather than
@@ -182,40 +197,59 @@ def parse_booklet(title: str) -> Optional[Dict[str, Any]]:
 
 def current_position(in_series: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    The booklet the student is actually working from -- the most RECENTLY
-    issued, not the highest numbered.
+    The booklet the student is working from -- normally the furthest they have
+    reached, since levels are taken in order.
 
-    Levels are not always taken in order. A child in grade 3 or below who
-    reaches level 14 is often given level 16 (order of operations) before
-    level 15 (long division), because long division frustrates young children
-    and stalling there costs more than the sequence is worth. Ranking by level
-    number would read such a child as being on 16 when they have since moved
-    back to 15, and would then ask for the wrong booklets entirely.
+    ONE transition is allowed out of order. Coming out of level 14, a younger
+    child is often given level 16 (order of operations) before level 15 (long
+    division), because long division frustrates them and stalling there costs
+    more than the sequence is worth. For that pair only, recency decides which
+    of the two they are on: ranking by number would read such a child as being
+    on 16 when they have since moved back to 15, and ask for booklets they
+    already finished. Everywhere else the highest number is the position --
+    the curriculum does not jump around.
 
-    Recency decides the LEVEL; within that level the furthest booklet decides
-    the position. Recency alone would misread a back-filled older booklet -- a
-    redo of 9-2 issued to a student already on 9-7 -- as a step backwards, and
-    demand booklets they finished weeks ago.
+    Within the chosen level the furthest booklet wins, so a back-filled older
+    booklet -- a redo of 9-2 issued to a student already on 9-7 -- is not read
+    as a step backwards.
     """
-    level = max(in_series, key=lambda b: (b['posted_key'], b['level']))['level']
+    top = max(b['level'] for b in in_series)
+    recent = max(in_series, key=lambda b: (b['posted_key'], b['level']))['level']
+    level = recent if {recent, top} <= SWAPPABLE_LEVELS else top
     return max((b for b in in_series if b['level'] == level),
                key=lambda b: b['book'])
+
+
+def _running_parallel(btm: List[Dict[str, Any]]) -> bool:
+    """
+    Whether the student is running levels 17 and 18 as two tracks at once.
+
+    Read from the history rather than assumed: level 17 still unfinished while
+    18 has already started is something sequential progression cannot produce,
+    since 18 only opens once 17 is complete and its test passed. A child who
+    finished 17 the ordinary way and moved on to 18 therefore does not trip it.
+    """
+    lo, hi = PARALLEL_LEVELS
+    levels = {b['level'] for b in btm}
+    if not {lo, hi} <= levels:
+        return False
+    return max(b['book'] for b in btm if b['level'] == lo) < BTM_LAST
 
 
 def next_booklet(level: int, book: int, series: str, levels_done=()):
     """
     The booklet that follows, rolling into the next level at the end.
 
-    Levels the student has already worked are skipped on the way: a child who
-    took 16 before 15 should go from 15-18 to 17-1, not back through 16.
+    Only the swappable pair is skipped on the way: a child who took 16 before
+    15 goes from 15-18 to 17-1, not back through 16. No other level is ever
+    skipped -- a gap anywhere else is a mistake to surface, not to route around.
     """
     last = BTM_LAST if series == 'BTM' else CTM_LAST
     first = BTM_FIRST if series == 'BTM' else CTM_FIRST
     if book < last:
         return level, book + 1
     level += 1
-    # Bounded: levels run to 24, so this cannot spin.
-    while level in levels_done and level <= 24:
+    while level in levels_done and level in SWAPPABLE_LEVELS:
         level += 1
     return level, first
 
@@ -320,13 +354,21 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     # weeks and then blocks the test.
     btm_seen = [b for b in booklets if b['series'] == 'BTM']
     if btm_seen:
-        current = current_position(btm_seen)
-        if current['book'] >= SUPP_EXPECTED_FROM_BOOK and not any(
-                s['level'] == current['level'] for s in supplements):
-            findings.append({
-                'series': 'BTM', 'kind': 'supplement_missing', 'expected': [],
-                'detail': f"level {current['level']} supplementary packet not given yet",
-            })
+        # Two tracks at once means two levels needing a packet, so each active
+        # level is checked rather than just the one current position.
+        if _running_parallel(btm_seen):
+            active = [max((b for b in btm_seen if b['level'] == lv),
+                          key=lambda b: b['book']) for lv in PARALLEL_LEVELS]
+        else:
+            active = [current_position(btm_seen)]
+        for current in active:
+            if current['book'] >= SUPP_EXPECTED_FROM_BOOK and not any(
+                    s['level'] == current['level'] for s in supplements):
+                findings.append({
+                    'series': 'BTM', 'kind': 'supplement_missing', 'expected': [],
+                    'detail': f"level {current['level']} supplementary packet "
+                              f"not given yet",
+                })
 
     for series, per_week in (('BTM', BTM_PER_WEEK), ('CTM', CTM_PER_WEEK)):
         in_series = [b for b in booklets if b['series'] == series]
@@ -339,6 +381,24 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'series': series, 'kind': 'blocked', 'expected': [],
                 'detail': ', '.join(b['title'] for b in open_fics),
             })
+            continue
+
+        # Two tracks at once: the week's two BTM booklets are one from level 17
+        # and one from level 18, not two from a single level. Each track is
+        # judged on its own -- a booklet in hand for 17 says nothing about
+        # whether 18 was handed over, which is exactly the miss to catch.
+        if series == 'BTM' and _running_parallel(in_series):
+            expected = []
+            for lv in PARALLEL_LEVELS:
+                track = [b for b in in_series if b['level'] == lv]
+                if any(b['outstanding'] for b in track):
+                    continue
+                furthest = max(track, key=lambda b: b['book'])
+                if furthest['book'] < BTM_LAST:
+                    expected.append(_label(lv, furthest['book'] + 1))
+            if expected:
+                findings.append({'series': series, 'kind': 'missing',
+                                 'expected': expected, 'detail': ''})
             continue
 
         # What matters is how many booklets the student is CURRENTLY HOLDING,
