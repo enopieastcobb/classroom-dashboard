@@ -1390,7 +1390,12 @@ async def classroom_dashboard(request: Request):
             " (SIMULATED)" if fake_now else "",
             session_date, window_open,
             " ; ".join(
-                f"{c['name']}: " + (
+                # The grade rides along: it decides whether a student is on the
+                # booklet curriculum at all, and an unset Section reads as
+                # unknown and is checked anyway. Without it in the line there
+                # is no way to tell a wrongly-flagged older student from one
+                # whose class simply has no grade recorded.
+                f"{c['name']} [{c.get('grade') or 'NO GRADE'}]: " + (
                     "; ".join(
                         f"{f['kind']}/{f['series'] or '-'}"
                         + (f"->{','.join(f['expected'])}" if f['expected'] else "")
