@@ -203,6 +203,16 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     today = today or date.today()
     today_key = today.isoformat()
 
+    # The booklet curriculum runs to the first semester of grade 5. Above that
+    # a child is on Algebra, Geometry and the like, so booklet expectations do
+    # not apply and asking for "the next booklet" is meaningless -- it was
+    # naming booklets for grade 7 and 8 students who are long past them.
+    # An unknown grade still gets checked: missing a young child's booklet is
+    # the costlier mistake.
+    grade = grade_number(section)
+    if grade is not None and grade > BOOKLET_EXPECTED_UP_TO_GRADE:
+        return {'findings': [], 'missing': [], 'notes': []}
+
     booklets, level_tests, supplements = [], [], []
     for i in items:
         if not _carries_booklets(i.get('topic')):
@@ -252,8 +262,8 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     findings = []
 
     # A child young enough to be on the booklet curriculum with no booklet work
-    # at all is a finding in itself, not a quiet pass.
-    grade = grade_number(section)
+    # at all is a finding in itself, not a quiet pass. (Grade was resolved
+    # above, where anyone past the curriculum returned early.)
     if not booklets and grade is not None and grade <= BOOKLET_EXPECTED_UP_TO_GRADE:
         findings.append({
             'series': '', 'kind': 'no_booklets', 'expected': [],
