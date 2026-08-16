@@ -25,13 +25,23 @@ CTM_FIRST, CTM_LAST = 19, 30
 BTM_PER_WEEK, CTM_PER_WEEK = 2, 1
 LEVEL_TEST_PASS = 80
 
-# Only these two topics carry booklet work.
-BOOKLET_TOPICS = ('math classwork', 'math homework')
+# Only Classwork and Homework carry booklet work.
+#
+# Note these are matched against the item's topic AFTER the subject has been
+# stripped from it: Classroom's "Maths Classwork" arrives here as subject
+# "Math" + topic "Classwork". Matching the full Classroom topic name would
+# never hit, which is exactly why no booklets were being found at all.
+BOOKLET_TOPICS = ('classwork', 'homework')
 
-# "8-25", "8 - 25", "L8-25", "16-17 hc.", "CTM 8-25". The leading guard stops
-# "Logic B2-14" and "Classic series A11-1" being read as booklets.
+# "8-25", "8 - 25", "L8-25", "16-17 hc.", "CTM 8-25".
+#
+# ANCHORED TO THE START of the title, which is what separates a booklet from
+# another series that merely contains a number pair. Every real booklet leads
+# with its number; "Geometry 1-3" and "Algebra 1 Unit 7 part 8: Algebra 10-2"
+# do not, and reading those as booklets 1-3 and 10-2 raised handover alerts
+# for booklets that don't exist in that student's curriculum.
 BOOKLET_RE = re.compile(
-    r'(?<![A-Za-z0-9])(?:(?P<series>BTM|CTM)\s*)?L?(?P<level>\d{1,2})\s*-\s*'
+    r'^\s*(?:(?P<series>BTM|CTM)\s*)?L?(?P<level>\d{1,2})\s*-\s*'
     r'(?P<book>\d{1,2})(?![\d-])', re.IGNORECASE)
 FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
 # "Level 12 Critical Test", "Level 15 BT", "Level E Test"
@@ -82,6 +92,10 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None) ->
 
     booklets, level_tests = [], []
     for i in items:
+        # Maths only, and only the two topics that carry booklets. Subject is
+        # checked explicitly because `items` holds both rooms for the student.
+        if i.get('subject') != 'Math':
+            continue
         if _norm_topic(i.get('topic')) not in BOOKLET_TOPICS:
             continue
         title = i.get('title') or ''
