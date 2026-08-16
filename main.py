@@ -313,7 +313,12 @@ class DataProcessor:
         r'classic series|comprehension|selection', re.IGNORECASE)
     MATH_HINT = re.compile(
         r'logic|basic thinking|critical thinking|number sense|fraction|'
-        r'algebra|ratio|multiplication|division|extra practice', re.IGNORECASE)
+        r'algebra|ratio|multiplication|division|extra practice|'
+        # A maths booklet reference is itself a maths signal: "7 - 13 HC",
+        # "BTM 19-5". Needed because completed booklets sit in a Graded topic,
+        # which names no subject -- without this they were read as English and
+        # dropped from the booklet history entirely.
+        r'\bbtm\b|\bctm\b|^\s*l?\d{1,2}\s*-\s*\d{1,2}\b', re.IGNORECASE)
 
     # Title -> curriculum strand. Order matters: the first match wins, so more
     # specific patterns come before the ones that would also match them.

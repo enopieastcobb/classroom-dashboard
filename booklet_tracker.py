@@ -28,13 +28,25 @@ CTM_FIRST, CTM_LAST = 19, 30
 BTM_PER_WEEK, CTM_PER_WEEK = 2, 1
 LEVEL_TEST_PASS = 80
 
-# Only Classwork and Homework carry booklet work.
+# Active booklet work lives in Classwork and Homework.
 #
 # Note these are matched against the item's topic AFTER the subject has been
 # stripped from it: Classroom's "Maths Classwork" arrives here as subject
 # "Math" + topic "Classwork". Matching the full Classroom topic name would
 # never hit, which is exactly why no booklets were being found at all.
 BOOKLET_TOPICS = ('classwork', 'homework')
+
+# Finished booklets are moved into a Graded topic, so the history has to be
+# read from there too. Without it a student who has completed everything looks
+# like one who was never given anything, and there is no way to tell which
+# booklet they are up to. These never count as outstanding -- their status is
+# already "done" -- so they set the position and nothing more.
+GRADED_TOPIC_RE = re.compile(r'graded', re.IGNORECASE)
+
+
+def _carries_booklets(topic: str) -> bool:
+    t = _norm_topic(topic)
+    return t in BOOKLET_TOPICS or bool(GRADED_TOPIC_RE.search(t))
 
 # A booklet is recognised two ways, tried in this order.
 #
@@ -54,6 +66,14 @@ BARE_RE = re.compile(
 FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
 # "Level 12 Critical Test", "Level 15 BT", "Level E Test"
 LEVEL_TEST_RE = re.compile(r'\blevel\s*(?P<level>\d{1,2})\b.*\btest\b', re.IGNORECASE)
+
+# The supplementary packet for a level, which must be finished before the level
+# test: the centre's view is that the 18 booklets AND the packet together are
+# what make the concept stick. Written variously as "L11 Supplementary Packet.",
+# "L16 supplementary packet .", "L13 supplement packet", "L12a Supplementary
+# Packet.", "Level 7 Supplementary Packet."
+SUPP_RE = re.compile(
+    r'\b(?:L|Level)\s*(?P<level>\d{1,2})[a-z]?\b.*\bsupplement', re.IGNORECASE)
 
 # Every child up to the first semester of grade 5 is on the booklet curriculum,
 # so one of them showing no booklet work at all is itself worth reporting: it
@@ -118,13 +138,17 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     today = today or date.today()
     today_key = today.isoformat()
 
-    booklets, level_tests = [], []
+    booklets, level_tests, supplements = [], [], []
     for i in items:
-        # Maths only, and only the two topics that carry booklets. Subject is
-        # checked explicitly because `items` holds both rooms for the student.
-        if i.get('subject') != 'Math':
+        if not _carries_booklets(i.get('topic')):
             continue
-        if _norm_topic(i.get('topic')) not in BOOKLET_TOPICS:
+        # `items` holds both rooms, so English work has to be kept out. The
+        # subject check is skipped for Graded topics: those name no subject, so
+        # everything in them is inferred from the title and a booklet or packet
+        # reads as English. The patterns below are specific enough to stand on
+        # their own there.
+        if (i.get('subject') != 'Math'
+                and not GRADED_TOPIC_RE.search(_norm_topic(i.get('topic')))):
             continue
         title = i.get('title') or ''
         b = parse_booklet(title)
@@ -134,6 +158,10 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'is_fic': bool(FIC_RE.search(title)),
                 # A FIC still owed: not handed back to the grader.
                 'open': i.get('status') == 'fic' and not i.get('turned_in'),
+                # The student still has this one in hand -- it counts towards
+                # what they are currently holding, whenever it was issued.
+                'outstanding': (i.get('status') in ('notdone', 'fic')
+                                and not i.get('turned_in')),
                 'posted_key': i.get('posted_key') or '',
             })
             continue
@@ -143,6 +171,14 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'level': int(t.group('level')), 'title': title,
                 'score': i.get('score_percent'),
                 'posted_key': i.get('posted_key') or '',
+            })
+            continue
+        s = SUPP_RE.search(title)
+        if s:
+            supplements.append({
+                'level': int(s.group('level')), 'title': title,
+                'outstanding': (i.get('status') in ('notdone', 'fic')
+                                and not i.get('turned_in')),
             })
 
     findings = []
@@ -170,8 +206,13 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
             })
             continue
 
-        issued_today = [b for b in in_series if b['posted_key'] == today_key]
-        shortfall = per_week - len(issued_today)
+        # What matters is how many booklets the student is CURRENTLY HOLDING,
+        # not how many were issued today. A booklet given earlier in the week
+        # and still being worked on is this week's issue -- counting only
+        # today's handovers demanded the next booklets from students who
+        # already had the right ones in hand.
+        holding = [b for b in in_series if b['outstanding']]
+        shortfall = per_week - len(holding)
         if shortfall <= 0:
             continue
 
@@ -183,8 +224,11 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         for _ in range(shortfall):
             level, book = next_booklet(level, book, series)
             # Crossing into a new level needs the level test passed first.
-            if book == (BTM_FIRST if series == 'BTM' else CTM_FIRST) and level > furthest['level']:
-                gate = _level_gate(level_tests, furthest['level'])
+            # The supplementary packet and level test gate the BASIC THINKING
+            # run: eighteen booklets plus the packet are what the level test
+            # examines. Critical thinking rolls into the next level on its own.
+            if series == 'BTM' and book == BTM_FIRST and level > furthest['level']:
+                gate = _level_gate(level_tests, furthest["level"], supplements)
                 if gate:
                     findings.append({'series': series, 'kind': gate['kind'],
                                      'expected': [], 'detail': gate['detail']})
@@ -202,12 +246,28 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     }
 
 
-def _level_gate(level_tests, finished_level) -> Optional[Dict[str, str]]:
-    """Whether the level test for `finished_level` clears the way to the next."""
+def _level_gate(level_tests, finished_level, supplements=()) -> Optional[Dict[str, str]]:
+    """
+    Whether the way is clear from `finished_level` into the next.
+
+    Two gates in order: the level's supplementary packet has to be done, and
+    only then does the level test apply. The centre's view is that the 18
+    booklets and the packet together are what make the concept stick, so the
+    test isn't due until the packet is finished.
+    """
+    packet = [s for s in supplements if s['level'] == finished_level]
+    if not packet:
+        return {'kind': 'needs_supplement',
+                'detail': f"level {finished_level} supplementary packet not given yet"}
+    if any(s['outstanding'] for s in packet):
+        return {'kind': 'supplement_outstanding',
+                'detail': f"level {finished_level} supplementary packet still outstanding"}
+
     taken = [t for t in level_tests if t['level'] == finished_level]
     if not taken:
         return {'kind': 'needs_level_test',
-                'detail': f"level {finished_level} test not given yet"}
+                'detail': f"level {finished_level} supplementary packet done — "
+                          f"level {finished_level} test is the next thing due"}
     best = max((t['score'] for t in taken if t['score'] is not None), default=None)
     if best is None:
         return {'kind': 'level_test_ungraded',
