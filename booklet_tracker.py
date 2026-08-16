@@ -383,24 +383,6 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
             })
             continue
 
-        # Two tracks at once: the week's two BTM booklets are one from level 17
-        # and one from level 18, not two from a single level. Each track is
-        # judged on its own -- a booklet in hand for 17 says nothing about
-        # whether 18 was handed over, which is exactly the miss to catch.
-        if series == 'BTM' and _running_parallel(in_series):
-            expected = []
-            for lv in PARALLEL_LEVELS:
-                track = [b for b in in_series if b['level'] == lv]
-                if any(b['outstanding'] for b in track):
-                    continue
-                furthest = max(track, key=lambda b: b['book'])
-                if furthest['book'] < BTM_LAST:
-                    expected.append(_label(lv, furthest['book'] + 1))
-            if expected:
-                findings.append({'series': series, 'kind': 'missing',
-                                 'expected': expected, 'detail': ''})
-            continue
-
         # What matters is how many booklets the student is CURRENTLY HOLDING,
         # not how many were issued today. A booklet given earlier in the week
         # and still being worked on is this week's issue -- counting only
@@ -409,6 +391,34 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         holding = [b for b in in_series if b['outstanding']]
         shortfall = per_week - len(holding)
         if shortfall <= 0:
+            continue
+
+        # Two tracks at once (see PARALLEL_LEVELS). The quota is unchanged --
+        # two basic thinking booklets a week, wherever they come from -- so a
+        # child already holding two is owed nothing regardless of how the two
+        # split across the levels. All that changes is WHICH booklets are named
+        # next: the track with nothing in hand is filled first, since that is
+        # the one that has stopped moving.
+        if series == 'BTM' and _running_parallel(in_series):
+            cursor, held = {}, {}
+            for lv in PARALLEL_LEVELS:
+                track = [b for b in in_series if b['level'] == lv]
+                cursor[lv] = max(b['book'] for b in track)
+                held[lv] = any(b['outstanding'] for b in track)
+            order = sorted(PARALLEL_LEVELS, key=lambda lv: held[lv])
+            expected = []
+            # Two passes: one from each track, then top up from whichever can
+            # still advance if a track has run out of booklets.
+            for _ in range(2):
+                for lv in order:
+                    if len(expected) >= shortfall:
+                        break
+                    if cursor[lv] < BTM_LAST:
+                        cursor[lv] += 1
+                        expected.append(_label(lv, cursor[lv]))
+            if expected:
+                findings.append({'series': series, 'kind': 'missing',
+                                 'expected': expected, 'detail': ''})
             continue
 
         # Walk forward from where the student is actually working -- the most
