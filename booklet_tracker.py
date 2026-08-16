@@ -86,6 +86,42 @@ BOOKLET_EXPECTED_UP_TO_GRADE = 5
 # it is raised while there is a whole level left to work through, rather than
 # at booklet 18 when the test is already due and the packet becomes a blocker.
 SUPP_EXPECTED_FROM_BOOK = 4
+
+# Booklets a grader has sent back to be redone after a failed level test.
+# Written on the LEVEL TEST assignment as "REDO: 12-19, 12-20, 12-22" --
+# preferred in the description, where there is room and it doesn't crowd the
+# assignment name, with the title accepted as a fallback since existing tests
+# already carry it there, e.g.
+#   "***CT 12- 45% ( Redo 12-19, 12-20,12-22,12-27)"
+# Comments are deliberately NOT a supported place: the Classroom API exposes no
+# comment endpoint, so anything written there can never be read back.
+REDO_RE = re.compile(r'\bredo\b\s*:?\s*(?P<list>[0-9,\s\-]+)', re.IGNORECASE)
+
+
+def parse_redo_list(*sources: str) -> List[Dict[str, int]]:
+    """
+    Booklets to redo, from the first source that carries a REDO marker.
+
+    Sources are tried in order -- description first, then title -- so a grader
+    who has written it properly is never second-guessed by an older title.
+    """
+    for text in sources:
+        m = REDO_RE.search(text or '')
+        if not m:
+            continue
+        found, seen = [], set()
+        for level, book in re.findall(r'(\d{1,2})\s*-\s*(\d{1,2})', m.group('list')):
+            level, book = int(level), int(book)
+            if not (1 <= level <= 24 and BTM_FIRST <= book <= CTM_LAST):
+                continue
+            if (level, book) in seen:
+                continue
+            seen.add((level, book))
+            found.append({'level': level, 'book': book,
+                          'series': 'BTM' if book <= BTM_LAST else 'CTM'})
+        if found:
+            return found
+    return []
 GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
 
 
@@ -177,6 +213,8 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'level': int(t.group('level')), 'title': title,
                 'score': i.get('score_percent'),
                 'posted_key': i.get('posted_key') or '',
+                # Description first, title as fallback.
+                'redo': parse_redo_list(i.get('given') or '', title),
             })
             continue
         s = SUPP_RE.search(title)
@@ -240,6 +278,18 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         furthest = max(in_series, key=lambda b: (b['level'], b['book']))
         level, book = furthest['level'], furthest['book']
 
+        # A failed level test can send specific booklets back to be redone.
+        # Those take precedence over moving on: they are what should be
+        # assigned, in the order the grader listed them, until they are done.
+        redo = _pending_redo(level_tests, furthest['level'], series, in_series)
+        if redo:
+            findings.append({
+                'series': series, 'kind': 'redo',
+                'expected': [_label(r['level'], r['book']) for r in redo[:shortfall]],
+                'detail': f"redo set after the level {furthest['level']} test",
+            })
+            continue
+
         expected = []
         for _ in range(shortfall):
             level, book = next_booklet(level, book, series)
@@ -275,13 +325,41 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
 
     return {
         'findings': deduped,
-        'missing': [b for f in deduped if f['kind'] == 'missing' for b in f['expected']],
+        'missing': [b for f in deduped if f['kind'] in ('missing', 'redo')
+                    for b in f['expected']],
         # Things a teacher has to act on that aren't a booklet handover, phrased
         # ready for the banner.
         'notes': [f['detail'] for f in deduped
                   if f['kind'] in ('supplement_missing', 'needs_supplement',
-                                   'supplement_outstanding', 'needs_level_test')],
+                                   'supplement_outstanding', 'needs_level_test',
+                                   # A failed test with no redo set listed is a
+                                   # dead end: nothing will be assigned until a
+                                   # grader says what to redo.
+                                   'level_test_failed', 'level_test_ungraded')],
     }
+
+
+def _pending_redo(level_tests, level, series, in_series) -> List[Dict[str, int]]:
+    """
+    Booklets still owed from a redo set, in the order the grader wrote them.
+
+    Only applies while the level test is actually failed: once a passing test
+    appears the redo set is spent and normal progression resumes. A booklet the
+    student is already holding is treated as under way and not asked for again.
+    """
+    failed = [t for t in level_tests
+              if t['level'] == level and t.get('redo')
+              and t['score'] is not None and t['score'] < LEVEL_TEST_PASS]
+    if not failed:
+        return []
+    if any(t['level'] == level and t['score'] is not None and t['score'] >= LEVEL_TEST_PASS
+           for t in level_tests):
+        return []          # a later attempt passed; the redo set is done with
+
+    holding = {(b['level'], b['book']) for b in in_series if b['outstanding']}
+    latest = max(failed, key=lambda t: t['posted_key'])
+    return [r for r in latest['redo']
+            if r['series'] == series and (r['level'], r['book']) not in holding]
 
 
 def _level_gate(level_tests, finished_level, supplements=()) -> Optional[Dict[str, str]]:
@@ -311,7 +389,10 @@ def _level_gate(level_tests, finished_level, supplements=()) -> Optional[Dict[st
         return {'kind': 'level_test_ungraded',
                 'detail': f"level {finished_level} test not graded yet"}
     if best < LEVEL_TEST_PASS:
+        listed = any(t.get('redo') for t in taken)
         return {'kind': 'level_test_failed',
-                'detail': f"level {finished_level} test scored {best}%, "
-                          f"under the {LEVEL_TEST_PASS}% pass mark"}
+                'detail': f"level {finished_level} test scored {best}%, under the "
+                          f"{LEVEL_TEST_PASS}% pass mark"
+                          + ("" if listed else
+                             " — no REDO list on the test, so nothing can be assigned")}
     return None
