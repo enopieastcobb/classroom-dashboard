@@ -1359,7 +1359,14 @@ async def classroom_dashboard(request: Request):
         # a teacher legitimately hands the booklets over at the end.
         handover_alert = []
         fake_now = simulated_now(form_data.get("simulate_time") or "")
-        window_open = in_handover_window(sel_time, session_date, fake_now)
+        # The pretend clock moves the time but not the date, so the session-date
+        # guard would confine every test to the four days the centre actually
+        # runs -- and the override exists precisely so a session need not be
+        # waited for. While a pretend time is in play the day dropdown stands in
+        # for the date. Nothing changes in production: with the override off
+        # fake_now is None and the real date is enforced.
+        window_open = in_handover_window(
+            sel_time, None if fake_now else session_date, fake_now)
 
         if window_open:
             for c in cards:
