@@ -97,6 +97,29 @@ SUPP_EXPECTED_FROM_BOOK = 4
 # comment endpoint, so anything written there can never be read back.
 REDO_RE = re.compile(r'\bredo\b\s*:?\s*(?P<list>[0-9,\s\-]+)', re.IGNORECASE)
 
+# A deliberate decision to move a child up despite a failed test -- written on
+# the level test as "ADVANCE: <reason>". Some children repeat a level several
+# times; at some point the frustration costs more than the mastery gains, and
+# the centre decides to move on. That is a judgement, not a pass, so the record
+# keeps it as such: the level clears, and the reason is carried with it rather
+# than the score being quietly treated as a pass.
+ADVANCE_RE = re.compile(r'\badvance\b\s*:?\s*(?P<reason>.*)', re.IGNORECASE)
+
+
+def parse_advance(*sources: str) -> Optional[str]:
+    """
+    The reason a child was advanced past a failed test, or None.
+
+    Returns the reason text, or a placeholder when the decision is recorded
+    without one -- progression is never blocked for want of an explanation,
+    but the missing reason is visible.
+    """
+    for text in sources:
+        m = ADVANCE_RE.search(text or '')
+        if m:
+            return m.group('reason').strip(' .-') or "no reason recorded"
+    return None
+
 
 def parse_redo_list(*sources: str) -> List[Dict[str, int]]:
     """
@@ -215,6 +238,7 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'posted_key': i.get('posted_key') or '',
                 # Description first, title as fallback.
                 'redo': parse_redo_list(i.get('given') or '', title),
+                'advance': parse_advance(i.get('given') or '', title),
             })
             continue
         s = SUPP_RE.search(title)
@@ -236,6 +260,16 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
             'detail': f"grade {grade} should be on the booklet curriculum, "
                       f"but no booklet work was found",
         })
+
+    # Advancing past a failed test is a judgement the centre made, so it is
+    # recorded as such rather than disappearing into a silent pass. Not an
+    # alert -- nothing needs fixing -- but it belongs in the log and the record.
+    for t in level_tests:
+        if t.get('advance'):
+            findings.append({
+                'series': '', 'kind': 'advanced', 'expected': [],
+                'detail': f"advanced past level {t['level']} by decision: {t['advance']}",
+            })
 
     # The level's supplementary packet, checked as soon as the child is a few
     # booklets into the level rather than only when the test falls due. A
@@ -347,6 +381,9 @@ def _pending_redo(level_tests, level, series, in_series) -> List[Dict[str, int]]
     appears the redo set is spent and normal progression resumes. A booklet the
     student is already holding is treated as under way and not asked for again.
     """
+    # A decision to move on ends the redo set, whatever was listed.
+    if any(t['level'] == level and t.get('advance') for t in level_tests):
+        return []
     failed = [t for t in level_tests
               if t['level'] == level and t.get('redo')
               and t['score'] is not None and t['score'] < LEVEL_TEST_PASS]
@@ -389,10 +426,18 @@ def _level_gate(level_tests, finished_level, supplements=()) -> Optional[Dict[st
         return {'kind': 'level_test_ungraded',
                 'detail': f"level {finished_level} test not graded yet"}
     if best < LEVEL_TEST_PASS:
+        # A recorded decision to move on outranks the score.
+        advanced = next((t['advance'] for t in taken if t.get('advance')), None)
+        if advanced:
+            return None
+        # A failing score with no decision recorded is itself a job not done:
+        # until a grader writes either list, nothing can be assigned and the
+        # child simply stalls.
         listed = any(t.get('redo') for t in taken)
         return {'kind': 'level_test_failed',
                 'detail': f"level {finished_level} test scored {best}%, under the "
                           f"{LEVEL_TEST_PASS}% pass mark"
                           + ("" if listed else
-                             " — no REDO list on the test, so nothing can be assigned")}
+                             " — needs a REDO: list or an ADVANCE: decision in the "
+                             "test description; nothing can be assigned until then")}
     return None
