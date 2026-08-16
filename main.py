@@ -1272,7 +1272,7 @@ async def classroom_dashboard(request: Request):
             # badges, and only for Maths -- booklets are a Maths idea.
             if sel_subject == "Math":
                 try:
-                    card["booklets"] = review_student(items, today_local())
+                    card["booklets"] = review_student(items, today_local(), card["grade"])
                 except Exception as e:
                     logger.error(f"Booklet check failed for '{name}': {e}", exc_info=True)
 

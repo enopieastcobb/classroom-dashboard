@@ -16,9 +16,12 @@ Curriculum shape:
   * finishing a level's BTM run does not roll straight into the next level: a
     level test sits in between and must be passed (>= 80) first
 """
+import logging
 import re
 from datetime import date
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 BTM_FIRST, BTM_LAST = 1, 18
 CTM_FIRST, CTM_LAST = 19, 30
@@ -33,19 +36,37 @@ LEVEL_TEST_PASS = 80
 # never hit, which is exactly why no booklets were being found at all.
 BOOKLET_TOPICS = ('classwork', 'homework')
 
-# "8-25", "8 - 25", "L8-25", "16-17 hc.", "CTM 8-25".
+# A booklet is recognised two ways, tried in this order.
 #
-# ANCHORED TO THE START of the title, which is what separates a booklet from
-# another series that merely contains a number pair. Every real booklet leads
-# with its number; "Geometry 1-3" and "Algebra 1 Unit 7 part 8: Algebra 10-2"
-# do not, and reading those as booklets 1-3 and 10-2 raised handover alerts
-# for booklets that don't exist in that student's curriculum.
-BOOKLET_RE = re.compile(
-    r'^\s*(?:(?P<series>BTM|CTM)\s*)?L?(?P<level>\d{1,2})\s*-\s*'
-    r'(?P<book>\d{1,2})(?![\d-])', re.IGNORECASE)
+# 1. An explicit BTM/CTM label -- "BTM 19-5", "CTM 8-25", "BTM 17-6 HC". This
+#    is authoritative and may sit anywhere in the title, so labelling removes
+#    all ambiguity: no other series can be mistaken for a booklet.
+LABELLED_RE = re.compile(
+    r'\b(?P<series>BTM|CTM)\s*L?(?P<level>\d{1,2})\s*-\s*(?P<book>\d{1,2})(?![\d-])',
+    re.IGNORECASE)
+# 2. A bare number pair, which must LEAD the title. That is what separates a
+#    booklet from another series that merely contains a number pair: every
+#    unlabelled booklet leads with its number, while "Geometry 1-3" and
+#    "Algebra 1 Unit 7 part 8: Algebra 10-2" do not. Reading those as booklets
+#    raised alerts for booklets that don't exist in the student's curriculum.
+BARE_RE = re.compile(
+    r'^\s*L?(?P<level>\d{1,2})\s*-\s*(?P<book>\d{1,2})(?![\d-])', re.IGNORECASE)
 FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
 # "Level 12 Critical Test", "Level 15 BT", "Level E Test"
 LEVEL_TEST_RE = re.compile(r'\blevel\s*(?P<level>\d{1,2})\b.*\btest\b', re.IGNORECASE)
+
+# Every child up to the first semester of grade 5 is on the booklet curriculum,
+# so one of them showing no booklet work at all is itself worth reporting: it
+# means either nothing was ever issued, or the titles aren't in a form the
+# check recognises. Silence would look like "all fine".
+BOOKLET_EXPECTED_UP_TO_GRADE = 5
+GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
+
+
+def grade_number(section: str) -> Optional[int]:
+    """The grade from a class section like "Gr 3 [2026-2027]"."""
+    m = GRADE_RE.search(section or '')
+    return int(m.group('grade')) if m else None
 
 
 def _norm_topic(topic: str) -> str:
@@ -54,18 +75,24 @@ def _norm_topic(topic: str) -> str:
 
 def parse_booklet(title: str) -> Optional[Dict[str, Any]]:
     """A booklet reference, or None when the title isn't one."""
-    m = BOOKLET_RE.search(title or '')
+    title = title or ''
+    m = LABELLED_RE.search(title) or BARE_RE.search(title)
     if not m:
         return None
     level, book = int(m.group('level')), int(m.group('book'))
     if not (1 <= level <= 24 and BTM_FIRST <= book <= CTM_LAST):
         return None
-    stated = (m.group('series') or '').upper()
-    return {
-        'level': level,
-        'book': book,
-        'series': stated or ('BTM' if book <= BTM_LAST else 'CTM'),
-    }
+    stated = (m.groupdict().get('series') or '').upper()
+    # A written label wins over the number range. If a grader writes
+    # "BTM 17-25" the label is what they meant, and the disagreement is
+    # reported so the title can be corrected rather than silently reinterpreted.
+    inferred = 'BTM' if book <= BTM_LAST else 'CTM'
+    if stated and stated != inferred:
+        logger.warning(
+            "Booklet %r is labelled %s but booklet %d falls in the %s range; "
+            "using the label.", title, stated, book, inferred)
+    return {'level': level, 'book': book, 'series': stated or inferred,
+            'labelled': bool(stated)}
 
 
 def next_booklet(level: int, book: int, series: str):
@@ -79,7 +106,8 @@ def _label(level: int, book: int) -> str:
     return f"{level}-{book}"
 
 
-def review_student(items: List[Dict[str, Any]], today: Optional[date] = None) -> Dict[str, Any]:
+def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
+                   section: str = "") -> Dict[str, Any]:
     """
     Works out what this student should have been handed today, and what they
     actually were.
@@ -118,6 +146,17 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None) ->
             })
 
     findings = []
+
+    # A child young enough to be on the booklet curriculum with no booklet work
+    # at all is a finding in itself, not a quiet pass.
+    grade = grade_number(section)
+    if not booklets and grade is not None and grade <= BOOKLET_EXPECTED_UP_TO_GRADE:
+        findings.append({
+            'series': '', 'kind': 'no_booklets', 'expected': [],
+            'detail': f"grade {grade} should be on the booklet curriculum, "
+                      f"but no booklet work was found",
+        })
+
     for series, per_week in (('BTM', BTM_PER_WEEK), ('CTM', CTM_PER_WEEK)):
         in_series = [b for b in booklets if b['series'] == series]
         if not in_series:
