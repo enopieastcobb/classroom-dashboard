@@ -43,6 +43,23 @@ HANDOVER_ALERT_FROM_MINUTE = 50
 #       --remove-env-vars ENABLE_TIME_OVERRIDE
 TIME_OVERRIDE_ENABLED = os.environ.get("ENABLE_TIME_OVERRIDE") == "1"
 
+
+def now_local() -> datetime:
+    """The current moment at the centre."""
+    return datetime.now(CENTER_TZ) if CENTER_TZ else datetime.now()
+
+
+def today_local() -> date:
+    """
+    Today's date at the centre -- NEVER date.today().
+
+    Cloud Run runs in UTC, which rolls into tomorrow at 8pm local through the
+    summer. Using it would mean that every evening the dashboard opens on the
+    wrong day, work due today reads as past due, and the session date resolves
+    a week ahead.
+    """
+    return now_local().date()
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -267,7 +284,7 @@ def resolve_session_date(day: str, today: Optional[date] = None) -> Optional[dat
     weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     if day not in weekdays:
         return None
-    today = today or date.today()
+    today = today or today_local()
     return today + timedelta(days=(weekdays.index(day) - today.weekday()) % 7)
 
 class DataProcessor:
@@ -527,14 +544,14 @@ class DataProcessor:
             # Neutral when nothing is owed: already handed in, or no due date.
             "due_state": (
                 '' if (done or turned_in or not due)
-                else 'past_due' if due < date.today()
-                else 'due_today' if due == date.today()
+                else 'past_due' if due < today_local()
+                else 'due_today' if due == today_local()
                 else 'due_later'
             ),
             # Sortable form, so items can be ordered most-urgent-first within
             # a priority tier. Undated sorts last.
             "due_key": due.isoformat() if due else '9999-12-31',
-            "overdue": bool(due and not done and due < date.today()),
+            "overdue": bool(due and not done and due < today_local()),
             "material": material,
             # "Given" is the physical notebook, recorded in the assignment header.
             "given": re.sub(r'^given:\s*', '', meta.get('description') or '', flags=re.I),
@@ -577,7 +594,7 @@ class DataProcessor:
         pods = [i for i in items if i["strand_code"] == 'POD']
         if not pods:
             return
-        today_key = date.today().isoformat()
+        today_key = today_local().isoformat()
         upcoming = sorted(
             (p for p in pods if p["due_label"] and p["due_key"] >= today_key),
             key=lambda p: p["due_key"],
@@ -1030,7 +1047,7 @@ def simulated_now(raw: str) -> Optional[datetime]:
         hh, mm = (int(p) for p in raw.strip().split(":")[:2])
     except (ValueError, TypeError):
         return None
-    today = datetime.now(CENTER_TZ) if CENTER_TZ else datetime.now()
+    today = now_local()
     return today.replace(hour=hh, minute=mm, second=0, microsecond=0)
 
 
@@ -1043,7 +1060,7 @@ def in_handover_window(session_time: str, session_date: Optional[date],
     weekly, so without it a Tuesday 5pm session would raise its alert every
     weekday at 5:50.
     """
-    now = now or (datetime.now(CENTER_TZ) if CENTER_TZ else datetime.now())
+    now = now or (now_local())
     if session_date and now.date() != session_date:
         return False
     try:
@@ -1111,7 +1128,7 @@ async def classroom_dashboard(request: Request):
 
         # Default to today when it's a session day, else the first one.
         if sel_day not in ScheduleService.DAYS:
-            today = date.today().strftime('%A')
+            today = today_local().strftime('%A')
             sel_day = today if today in ScheduleService.DAYS else ScheduleService.DAYS[0]
         schedule_data = get_day_schedule_cached(sel_day)
         entries = schedule_data["entries"]
@@ -1255,7 +1272,7 @@ async def classroom_dashboard(request: Request):
             # badges, and only for Maths -- booklets are a Maths idea.
             if sel_subject == "Math":
                 try:
-                    card["booklets"] = review_student(items)
+                    card["booklets"] = review_student(items, today_local())
                 except Exception as e:
                     logger.error(f"Booklet check failed for '{name}': {e}", exc_info=True)
 
