@@ -173,8 +173,13 @@
   <div class="ha-head">Booklets not yet handed over — class ends soon</div>
   <ul>
     {% for a in handover_alert %}
+    {% if a.missing %}
     <li><span class="ha-name">{{ a.name }}</span> did not receive
       <span class="ha-books">{{ a.missing | join(', ') }}</span></li>
+    {% endif %}
+    {% for n in a.notes %}
+    <li><span class="ha-name">{{ a.name }}</span> — <span class="ha-books">{{ n }}</span></li>
+    {% endfor %}
     {% endfor %}
   </ul>
   <p class="ha-foot">This clears itself once the booklets are assigned in Classroom.</p>

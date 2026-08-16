@@ -1365,9 +1365,11 @@ async def classroom_dashboard(request: Request):
             for c in cards:
                 if c["state"] != "ok":
                     continue
-                missing = (c.get("booklets") or {}).get("missing") or []
-                if missing:
-                    handover_alert.append({"name": c["name"], "missing": missing})
+                b = c.get("booklets") or {}
+                missing, notes = b.get("missing") or [], b.get("notes") or []
+                if missing or notes:
+                    handover_alert.append({"name": c["name"], "missing": missing,
+                                           "notes": notes})
 
         # Logged on EVERY request, not just when it fires. "The banner didn't
         # appear" has several possible causes -- outside the window, the wrong
@@ -1394,8 +1396,12 @@ async def classroom_dashboard(request: Request):
         if handover_alert:
             logger.warning(
                 "HANDOVER ALERT %s %s %s: %s", sel_day, sel_time, sel_subject,
-                "; ".join(f"{a['name']} missing {', '.join(a['missing'])}"
-                          for a in handover_alert))
+                "; ".join(
+                    f"{a['name']} "
+                    + " / ".join(
+                        ([f"missing {', '.join(a['missing'])}"] if a['missing'] else [])
+                        + a['notes'])
+                    for a in handover_alert))
 
         timings['total'] = round(time.perf_counter() - t_request, 2)
         logger.info(f"{sel_day} {sel_subject} {sel_time}: {summary} timings={timings}")

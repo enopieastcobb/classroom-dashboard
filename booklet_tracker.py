@@ -80,6 +80,12 @@ SUPP_RE = re.compile(
 # means either nothing was ever issued, or the titles aren't in a form the
 # check recognises. Silence would look like "all fine".
 BOOKLET_EXPECTED_UP_TO_GRADE = 5
+
+# Once a child is this far into a level's basic thinking run, the level's
+# supplementary packet should already have been issued. Catching it here means
+# it is raised while there is a whole level left to work through, rather than
+# at booklet 18 when the test is already due and the packet becomes a blocker.
+SUPP_EXPECTED_FROM_BOOK = 4
 GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
 
 
@@ -193,6 +199,20 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                       f"but no booklet work was found",
         })
 
+    # The level's supplementary packet, checked as soon as the child is a few
+    # booklets into the level rather than only when the test falls due. A
+    # packet forgotten when a new level starts otherwise goes unnoticed for
+    # weeks and then blocks the test.
+    btm_seen = [b for b in booklets if b['series'] == 'BTM']
+    if btm_seen:
+        current = max(btm_seen, key=lambda b: (b['level'], b['book']))
+        if current['book'] >= SUPP_EXPECTED_FROM_BOOK and not any(
+                s['level'] == current['level'] for s in supplements):
+            findings.append({
+                'series': 'BTM', 'kind': 'supplement_missing', 'expected': [],
+                'detail': f"level {current['level']} supplementary packet not given yet",
+            })
+
     for series, per_week in (('BTM', BTM_PER_WEEK), ('CTM', CTM_PER_WEEK)):
         in_series = [b for b in booklets if b['series'] == series]
         if not in_series:
@@ -240,9 +260,27 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
             findings.append({'series': series, 'kind': 'missing',
                              'expected': expected, 'detail': ''})
 
+    # The early packet check and the level-boundary gate can reach the same
+    # conclusion; say it once.
+    # Keyed on the MESSAGE, not the kind: the early check and the boundary gate
+    # reach the same conclusion under different kinds and would otherwise print
+    # the same sentence twice.
+    seen_details, deduped = set(), []
+    for f in findings:
+        if f['detail'] and f['detail'] in seen_details:
+            continue
+        if f['detail']:
+            seen_details.add(f['detail'])
+        deduped.append(f)
+
     return {
-        'findings': findings,
-        'missing': [b for f in findings if f['kind'] == 'missing' for b in f['expected']],
+        'findings': deduped,
+        'missing': [b for f in deduped if f['kind'] == 'missing' for b in f['expected']],
+        # Things a teacher has to act on that aren't a booklet handover, phrased
+        # ready for the banner.
+        'notes': [f['detail'] for f in deduped
+                  if f['kind'] in ('supplement_missing', 'needs_supplement',
+                                   'supplement_outstanding', 'needs_level_test')],
     }
 
 
