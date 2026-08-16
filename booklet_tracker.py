@@ -381,28 +381,33 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         if not in_series:
             continue
 
+        # What matters is how many booklets the student is CURRENTLY HOLDING,
+        # not how many were issued today. A booklet given earlier in the week
+        # and still being worked on is this week's issue -- counting only
+        # today's handovers demanded the next booklets from students who
+        # already had the right ones in hand.
+        #
+        # This comes FIRST, ahead of the open-FIC check: an open FIC is itself
+        # a booklet in hand, so a student can be blocked and still be holding
+        # the full week. Nirman had 20-10 FIC and 20-11 -- two BTM, the week
+        # satisfied -- and reporting a hold there said nothing a teacher could
+        # act on. Nothing owed, nothing to say.
+        holding = [b for b in in_series if b['outstanding']]
+        shortfall = per_week - len(holding)
+        if shortfall <= 0:
+            continue
+
+        # Short AND blocked: the hold is why nothing more is coming, so it is
+        # worth saying. Working the FIC through with the child is the action
+        # that unblocks the rest.
         open_fics = [b for b in in_series if b['is_fic'] and b['open']]
         if open_fics:
-            # Phrased for the banner. A held series is an action for this
-            # teacher in this hour -- the FIC is to be worked through with the
-            # child before the next booklet follows -- and staying silent made
-            # a student on hold look identical to one who needs nothing.
             findings.append({
                 'series': series, 'kind': 'blocked', 'expected': [],
                 'detail': f"{series} on hold until "
                           + ', '.join(b['title'] for b in open_fics)
                           + " is fixed",
             })
-            continue
-
-        # What matters is how many booklets the student is CURRENTLY HOLDING,
-        # not how many were issued today. A booklet given earlier in the week
-        # and still being worked on is this week's issue -- counting only
-        # today's handovers demanded the next booklets from students who
-        # already had the right ones in hand.
-        holding = [b for b in in_series if b['outstanding']]
-        shortfall = per_week - len(holding)
-        if shortfall <= 0:
             continue
 
         # Two tracks at once (see PARALLEL_LEVELS). The quota is unchanged --
