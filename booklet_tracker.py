@@ -383,9 +383,15 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
 
         open_fics = [b for b in in_series if b['is_fic'] and b['open']]
         if open_fics:
+            # Phrased for the banner. A held series is an action for this
+            # teacher in this hour -- the FIC is to be worked through with the
+            # child before the next booklet follows -- and staying silent made
+            # a student on hold look identical to one who needs nothing.
             findings.append({
                 'series': series, 'kind': 'blocked', 'expected': [],
-                'detail': ', '.join(b['title'] for b in open_fics),
+                'detail': f"{series} on hold until "
+                          + ', '.join(b['title'] for b in open_fics)
+                          + " is fixed",
             })
             continue
 
@@ -494,7 +500,7 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         # next level hasn't opened.
         'notes': [f['detail'] for f in deduped
                   if f['kind'] in ('supplement_missing', 'needs_supplement',
-                                   'needs_level_test',
+                                   'blocked', 'needs_level_test',
                                    # A failed test with no redo set listed is a
                                    # dead end: nothing will be assigned until a
                                    # grader says what to redo.
