@@ -1354,15 +1354,38 @@ async def classroom_dashboard(request: Request):
         # a teacher legitimately hands the booklets over at the end.
         handover_alert = []
         fake_now = simulated_now(form_data.get("simulate_time") or "")
-        if fake_now:
-            logger.warning(f"TIME OVERRIDE in use: pretending it is {fake_now:%Y-%m-%d %H:%M %Z}")
-        if in_handover_window(sel_time, session_date, fake_now):
+        window_open = in_handover_window(sel_time, session_date, fake_now)
+
+        if window_open:
             for c in cards:
                 if c["state"] != "ok":
                     continue
                 missing = (c.get("booklets") or {}).get("missing") or []
                 if missing:
                     handover_alert.append({"name": c["name"], "missing": missing})
+
+        # Logged on EVERY request, not just when it fires. "The banner didn't
+        # appear" has several possible causes -- outside the window, the wrong
+        # room, no booklets recognised -- and without this line none of them
+        # can be told apart after the fact.
+        logger.info(
+            "HANDOVER CHECK day=%s time=%s subject=%s | now=%s%s session_date=%s "
+            "window_open=%s | %s",
+            sel_day, sel_time, sel_subject,
+            (fake_now or now_local()).strftime('%Y-%m-%d %H:%M'),
+            " (SIMULATED)" if fake_now else "",
+            session_date, window_open,
+            " ; ".join(
+                f"{c['name']}: " + (
+                    "; ".join(
+                        f"{f['kind']}/{f['series'] or '-'}"
+                        + (f"->{','.join(f['expected'])}" if f['expected'] else "")
+                        for f in (c.get("booklets") or {}).get("findings", [])
+                    ) or "no findings")
+                for c in cards if c["state"] == "ok"
+            ) or "no students",
+        )
+
         if handover_alert:
             logger.warning(
                 "HANDOVER ALERT %s %s %s: %s", sel_day, sel_time, sel_subject,
