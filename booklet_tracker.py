@@ -486,9 +486,15 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                     for b in f['expected']],
         # Things a teacher has to act on that aren't a booklet handover, phrased
         # ready for the banner.
+        # 'supplement_outstanding' is deliberately absent: the packet WAS
+        # handed over, the student simply hasn't finished it. Nothing was
+        # forgotten, so it does not belong in a banner about forgotten
+        # handovers -- and the card already shows it as an overdue item. It
+        # stays in `findings` for the log, where it still explains why the
+        # next level hasn't opened.
         'notes': [f['detail'] for f in deduped
                   if f['kind'] in ('supplement_missing', 'needs_supplement',
-                                   'supplement_outstanding', 'needs_level_test',
+                                   'needs_level_test',
                                    # A failed test with no redo set listed is a
                                    # dead end: nothing will be assigned until a
                                    # grader says what to redo.
