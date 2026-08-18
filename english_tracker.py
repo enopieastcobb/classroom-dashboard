@@ -53,15 +53,16 @@ LEVEL_TEST_DUE_AT_BOOK = 28
 TEST_TOLERANCE_INTO_NEXT = 2
 LEVEL_TEST_PASS = 80
 
-# How far into the new level a MISSING test record is still worth reporting.
+# A missing test is reported from booklet 28 onwards -- no test at 28 means the
+# child was never started on it in time, which is the miss itself rather than
+# something that only becomes wrong later.
 #
-# Old tests are not kept in Classroom -- a child's Graded topic shows the level's
-# booklets with no test beside them -- so beyond the boundary "never given" and
-# "given long ago and since archived" are indistinguishable. Reporting the second
-# as the first would accuse a teacher on every card, every session, about history
-# nobody can now change. An UNFINISHED test is different: the record is right
-# there, so it is reported for as long as it stays unfinished.
-TEST_MISSING_WINDOW = 5
+# It stops being reported ten booklets past that point. A level takes a child
+# seven or eight months, so anything further back is last year's problem: nobody
+# can act on it, and old tests do not survive in Classroom anyway, so absence
+# stops being evidence. Measured from booklet 28 of the level the test belongs
+# to, which puts the last booklet still worth mentioning at 8 of the next level.
+TEST_LOOKBACK_BOOKLETS = 10
 
 BOOKLET_TOPICS = ('classwork', 'homework')
 GRADED_TOPIC_RE = re.compile(r'graded', re.IGNORECASE)
@@ -403,31 +404,30 @@ def _test_state(reading, tests, pos) -> Optional[Dict[str, Any]]:
     def exists(level: str) -> bool:
         return any(t['level'] == level for t in tests)
 
-    # Past tolerance: still in a level, more than 2 booklets in, with the
-    # previous level's test unfinished.
-    if i > 0 and pos['book'] > TEST_TOLERANCE_INTO_NEXT:
+    # The level just finished: its test should have been started at booklet 28
+    # and finished by booklet 2 of this one. Booklets 29 and 30 of that level,
+    # plus however far into this one the child has come, is how stale the
+    # question has become.
+    if i > 0 and (2 + pos['book']) <= TEST_LOOKBACK_BOOKLETS:
         prev = READING_LEVELS[i - 1]
-        # A missing record is only reported near the boundary -- see
-        # TEST_MISSING_WINDOW. Further in, absence proves nothing.
         if not exists(prev):
-            if pos['book'] <= TEST_MISSING_WINDOW:
-                return {'series': 'ENG', 'kind': 'test_missing', 'expected': [],
-                        'severe': True,
-                        'detail': f"level {prev} test was never given -- child "
-                                  f"is already on {pos['level']}-{pos['book']}"}
-            return None
-        if not finished(prev):
+            return {'series': 'ENG', 'kind': 'test_missing', 'expected': [],
+                    'severe': True,
+                    'detail': f"level {prev} test missing -- child is already "
+                              f"on {pos['level']}-{pos['book']}"}
+        if not finished(prev) and pos['book'] > TEST_TOLERANCE_INTO_NEXT:
             return {'series': 'ENG', 'kind': 'test_overdue', 'expected': [],
                     'severe': True,
                     'detail': f"level {prev} test still unfinished -- child is "
                               f"already on {pos['level']}-{pos['book']}"}
 
-    # Due now, and within tolerance.
+    # The current level: the test should be in place from booklet 28.
     if pos['book'] >= LEVEL_TEST_DUE_AT_BOOK and not exists(pos['level']):
-        return {'series': 'ENG', 'kind': 'test_due', 'expected': [],
-                'severe': False,
-                'detail': f"level {pos['level']} test due now "
-                          f"(at booklet {pos['book']})"}
+        return {'series': 'ENG', 'kind': 'test_missing', 'expected': [],
+                'severe': True,
+                'detail': f"level {pos['level']} test missing -- child is at "
+                          f"booklet {pos['book']}, it should have started at "
+                          f"{LEVEL_TEST_DUE_AT_BOOK}"}
 
     # Sat and failed, with no decision recorded either way.
     for t in tests:
