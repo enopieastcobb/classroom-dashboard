@@ -53,6 +53,16 @@ LEVEL_TEST_DUE_AT_BOOK = 28
 TEST_TOLERANCE_INTO_NEXT = 2
 LEVEL_TEST_PASS = 80
 
+# How far into the new level a MISSING test record is still worth reporting.
+#
+# Old tests are not kept in Classroom -- a child's Graded topic shows the level's
+# booklets with no test beside them -- so beyond the boundary "never given" and
+# "given long ago and since archived" are indistinguishable. Reporting the second
+# as the first would accuse a teacher on every card, every session, about history
+# nobody can now change. An UNFINISHED test is different: the record is right
+# there, so it is reported for as long as it stays unfinished.
+TEST_MISSING_WINDOW = 5
+
 BOOKLET_TOPICS = ('classwork', 'homework')
 GRADED_TOPIC_RE = re.compile(r'graded', re.IGNORECASE)
 GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
@@ -268,3 +278,292 @@ def resolve_ambiguous_level(level: str, grade: Optional[int],
     if level not in ('6', '7', '8'):
         return True
     return english_trace and grade is not None and 3 <= grade <= 4
+
+
+def _position(reading: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    The furthest reading booklet reached.
+
+    Plain highest-wins, unlike maths: the English ladder has no swapped pair, so
+    levels are always taken in order.
+    """
+    return max(reading, key=lambda b: (level_index(b['level']) or 0, b['book']))
+
+
+def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
+    """
+    Sort the student's work into reading booklets, writing booklets and tests.
+
+    Two passes, because of one collision. Levels 6, 7 and 8 belong to both
+    curricula and the shared Graded topic names no subject, so an unprefixed
+    booklet there could be either room. Unambiguous work is gathered first and
+    used as the evidence for deciding the rest.
+    """
+    reading, writing, tests, maybe = [], [], [], []
+    for i in items:
+        topic = i.get('topic')
+        if not carries_booklets(topic):
+            continue
+        subject_known = i.get('subject') == 'English'
+        shared_graded = bool(GRADED_TOPIC_RE.search(_norm_topic(topic)))
+        if not subject_known and not shared_graded:
+            continue
+        title = i.get('title') or ''
+
+        lvl = parse_level_test(title)
+        if lvl:
+            tests.append({
+                'level': lvl, 'title': title,
+                'score': i.get('score_percent'),
+                'graded': i.get('status') == 'done',
+                'posted_key': i.get('posted_key') or '',
+                'redo': parse_redo_list(i.get('given') or '', title),
+                'advance': parse_advance(i.get('given') or '', title),
+            })
+            continue
+
+        w = parse_writing(title)
+        if w:
+            writing.append({**w, 'title': title})
+            continue
+
+        for b in parse_reading_all(title):
+            rec = {
+                **b, 'title': title,
+                'is_fic': bool(FIC_RE.search(title)),
+                'open': i.get('status') == 'fic' and not i.get('turned_in'),
+                'outstanding': (i.get('status') in ('notdone', 'fic')
+                                and not i.get('turned_in')),
+                'exempt': bool(REDO_PREFIX_RE.search(title)
+                               or REISSUE_RE.search(title)),
+            }
+            # Undecidable only when unlabelled, at 6/7/8, and with no subject on
+            # the topic to settle it.
+            if (not b['labelled'] and b['level'] in ('6', '7', '8')
+                    and not subject_known):
+                maybe.append(rec)
+            else:
+                reading.append(rec)
+
+    # English 6-8 sit at the top of the ladder, so a child who has genuinely
+    # reached them has unambiguous history at level I or beyond.
+    trace = any((level_index(b['level']) or 0) >= (level_index('I') or 0)
+                for b in reading)
+    reading.extend(b for b in maybe
+                   if resolve_ambiguous_level(b['level'], grade, trace))
+    return reading, writing, tests
+
+
+def _duplicates(reading: List[Dict[str, Any]],
+                tests: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Booklets issued more than once without a reason.
+
+    A repeat is normally an error, but redo booklets are deliberately reassigned
+    week after week, so anything carrying REDO or REISSUE, or named on its own
+    level's redo list, is exempt. Without that exemption every correctly-handled
+    failed test would accuse the teacher who did the right thing.
+    """
+    redo_set = {(lvl, bk) for t in tests for lvl, bk in t['redo']}
+    counts: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+    for b in reading:
+        counts.setdefault((b['level'], b['book']), []).append(b)
+
+    out = []
+    for (lvl, book), group in sorted(counts.items()):
+        if len(group) < 2:
+            continue
+        if (lvl, book) in redo_set or any(b['exempt'] for b in group):
+            continue
+        out.append({'series': 'ENG', 'kind': 'duplicate', 'expected': [],
+                    'severe': True,
+                    'detail': f"{lvl}-{book} assigned {len(group)} times"})
+    return out
+
+
+def _test_state(reading, tests, pos) -> Optional[Dict[str, Any]]:
+    """
+    Whether the level test is where it should be.
+
+    It falls due at booklet 28 and may run across the level boundary, tolerated
+    through booklet 2 of the next level -- ninety minutes does not fit in one
+    session. Past that it is prominent: the child is a whole level on with an
+    unfinished test behind them.
+    """
+    i = level_index(pos['level'])
+    if i is None:
+        return None
+
+    def finished(level: str) -> Optional[Dict[str, Any]]:
+        for t in tests:
+            if t['level'] == level and t['graded']:
+                return t
+        return None
+
+    def exists(level: str) -> bool:
+        return any(t['level'] == level for t in tests)
+
+    # Past tolerance: still in a level, more than 2 booklets in, with the
+    # previous level's test unfinished.
+    if i > 0 and pos['book'] > TEST_TOLERANCE_INTO_NEXT:
+        prev = READING_LEVELS[i - 1]
+        # A missing record is only reported near the boundary -- see
+        # TEST_MISSING_WINDOW. Further in, absence proves nothing.
+        if not exists(prev):
+            if pos['book'] <= TEST_MISSING_WINDOW:
+                return {'series': 'ENG', 'kind': 'test_missing', 'expected': [],
+                        'severe': True,
+                        'detail': f"level {prev} test was never given -- child "
+                                  f"is already on {pos['level']}-{pos['book']}"}
+            return None
+        if not finished(prev):
+            return {'series': 'ENG', 'kind': 'test_overdue', 'expected': [],
+                    'severe': True,
+                    'detail': f"level {prev} test still unfinished -- child is "
+                              f"already on {pos['level']}-{pos['book']}"}
+
+    # Due now, and within tolerance.
+    if pos['book'] >= LEVEL_TEST_DUE_AT_BOOK and not exists(pos['level']):
+        return {'series': 'ENG', 'kind': 'test_due', 'expected': [],
+                'severe': False,
+                'detail': f"level {pos['level']} test due now "
+                          f"(at booklet {pos['book']})"}
+
+    # Sat and failed, with no decision recorded either way.
+    for t in tests:
+        if (t['graded'] and t['score'] is not None
+                and t['score'] < LEVEL_TEST_PASS
+                and not t['redo'] and not t['advance']):
+            return {'series': 'ENG', 'kind': 'test_failed_no_decision',
+                    'expected': [], 'severe': False,
+                    'detail': f"level {t['level']} test scored {t['score']}% "
+                              f"with no REDO or ADVANCE recorded"}
+    return None
+
+
+def _writing_state(reading, writing, grade) -> Optional[Dict[str, Any]]:
+    """
+    Whether a writing booklet is in hand, for the children who get them.
+
+    Never a weekly check: one writing booklet covers a whole reading level for
+    A-E, or six to eight weeks from F. So the only question is whether one
+    exists, at a level matching the reading level or the one above it.
+    """
+    if grade is None or grade > WRITING_MAX_GRADE:
+        return None
+    if not reading:
+        return None
+    pos = _position(reading)
+    if pos['level'] not in WRITING_LEVELS:
+        return None
+    if not writing:
+        return {'series': 'EW', 'kind': 'writing_missing', 'expected': [],
+                'severe': False,
+                'detail': "no essay writing booklet assigned"}
+    wi = WRITING_LEVELS.index(pos['level'])
+    allowed = {WRITING_LEVELS[wi]}
+    if wi + 1 < len(WRITING_LEVELS):
+        allowed.add(WRITING_LEVELS[wi + 1])
+    # The pairing loosens at grade 1: a child who has reached first grade is
+    # moved to E or F writing whatever their reading level. Aadhya P is on
+    # reading D with writing F-1, which the general rule alone would flag.
+    if grade == 1:
+        allowed |= {'E', 'F'}
+    if not any(w['level'] in allowed for w in writing):
+        best = max(writing, key=lambda w: WRITING_LEVELS.index(w['level']))
+        return {'series': 'EW', 'kind': 'writing_level', 'expected': [],
+                'severe': False,
+                'detail': f"essay writing booklet is {best['level']}-"
+                          f"{best['book']}, expected "
+                          f"{' or '.join(sorted(allowed))} for reading level "
+                          f"{pos['level']}"}
+    return None
+
+
+def review_student(items: List[Dict[str, Any]], today=None,
+                   section: str = "") -> Dict[str, Any]:
+    """
+    What this student should have been handed, and what they were.
+
+    Returns findings (everything, for the log), missing (booklets to name in the
+    banner), notes (everything else worth a line) and severe (the subset that
+    needs to stand out).
+    """
+    grade = grade_number(section)
+    reading, writing, tests = _collect(items, grade)
+
+    findings: List[Dict[str, Any]] = []
+
+    # Past the curriculum but still on booklets. The reverse of maths, where
+    # grade 6+ goes silent: here it is the anomaly that is worth saying, because
+    # a child this old should have been moved off booklets.
+    if grade is not None and grade > READING_MAX_GRADE:
+        if reading:
+            findings.append({
+                'series': 'ENG', 'kind': 'past_curriculum', 'expected': [],
+                'severe': False,
+                'detail': f"grade {grade} and still on English booklets"})
+        return _result(findings)
+
+    findings.extend(_duplicates(reading, tests))
+
+    if reading:
+        pos = _position(reading)
+        state = _test_state(reading, tests, pos)
+        if state:
+            findings.append(state)
+
+        # The count comes first, as in maths: an open FIC is itself a booklet in
+        # hand, so a child can be blocked and still hold the week's booklet.
+        holding = [b for b in reading if b['outstanding']]
+        if len(holding) < READING_PER_WEEK:
+            open_fics = [b for b in reading if b['is_fic'] and b['open']]
+            redo = [(l, b) for t in tests for l, b in t['redo']
+                    if not any(r['level'] == l and r['book'] == b
+                               and not r['outstanding'] for r in reading)]
+            if open_fics:
+                findings.append({
+                    'series': 'ENG', 'kind': 'blocked', 'expected': [],
+                    'severe': False,
+                    'detail': "reading on hold until "
+                              + ', '.join(b['title'] for b in open_fics)
+                              + " is fixed"})
+            elif redo:
+                lvl, book = redo[0]
+                findings.append({'series': 'ENG', 'kind': 'redo', 'severe': False,
+                                 'expected': [f"{lvl}-{book}"],
+                                 'detail': "from the redo set"})
+            else:
+                nxt = next_reading_booklet(pos['level'], pos['book'])
+                if nxt:
+                    findings.append({'series': 'ENG', 'kind': 'missing',
+                                     'severe': False, 'detail': '',
+                                     'expected': [f"{nxt[0]}-{nxt[1]}"]})
+    elif grade is not None:
+        findings.append({'series': 'ENG', 'kind': 'no_booklets', 'expected': [],
+                         'severe': False,
+                         'detail': f"grade {grade} but no English booklet work found"})
+
+    w = _writing_state(reading, writing, grade)
+    if w:
+        findings.append(w)
+
+    return _result(findings)
+
+
+def _result(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    seen, deduped = set(), []
+    for f in findings:
+        key = (f['kind'], f['detail'], tuple(f['expected']))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+    return {
+        'findings': deduped,
+        'missing': [b for f in deduped if f['kind'] in ('missing', 'redo')
+                    for b in f['expected']],
+        'notes': [f['detail'] for f in deduped
+                  if f['detail'] and f['kind'] not in ('missing', 'redo')],
+        'severe': [f['detail'] for f in deduped if f.get('severe')],
+    }
