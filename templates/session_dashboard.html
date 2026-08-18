@@ -31,6 +31,18 @@
   .handover-alert .ha-name { font-weight:700; }
   .handover-alert .ha-books { font-weight:700; color:#D93025; }
   .handover-alert .ha-foot { font-size:11px; color:#9a6b6b; margin:10px 0 0; }
+  /* A level test never started, or the same booklet issued twice. Marked out
+     from the ordinary lines because these are mistakes rather than a booklet
+     simply not handed over yet -- and the list can be long enough that one
+     more line would otherwise disappear into it. Colour is not the only
+     signal: the label carries the meaning on its own. */
+  .handover-alert li.ha-severe { background:#FBDEDA; border-radius:6px;
+    padding:5px 8px; margin:6px 0; }
+  .ha-flag {
+    display:inline-block; font-size:10px; font-weight:800; letter-spacing:.06em;
+    background:#B3261E; color:#fff; border-radius:4px; padding:2px 6px;
+    margin-right:7px; vertical-align:1px;
+  }
 
   .searchbar { display:flex; gap:10px; margin-bottom:16px; }
   .searchbar input {
@@ -178,7 +190,12 @@
       <span class="ha-books">{{ a.missing | join(', ') }}</span></li>
     {% endif %}
     {% for n in a.notes %}
+    {% if n in a.severe %}
+    <li class="ha-severe"><span class="ha-flag">CHECK NOW</span><span
+      class="ha-name">{{ a.name }}</span> — <span class="ha-books">{{ n }}</span></li>
+    {% else %}
     <li><span class="ha-name">{{ a.name }}</span> — <span class="ha-books">{{ n }}</span></li>
+    {% endif %}
     {% endfor %}
     {% endfor %}
   </ul>

@@ -125,3 +125,17 @@ show('End of ladder - 8-30 finished', [
     gr('ENG 8-30 HC'), it('ENG Level 8 Test', topic='Classwork', status='done',
                           turned_in=True, score=95),
 ], 'Gr 4 [2026-2027]')
+
+# Handed in but unmarked -- the follow-through is the teacher's.
+show('Level F test handed in, not yet graded', [
+    it('ENG G - 4 HC'),
+    it('ENG Level F Test', topic='To Be Graded', status='submitted', turned_in=True),
+    gr('F-30 HC'),
+], 'Gr 3 [2026-2027]')
+
+# Child never finished it -- different problem, stays severe.
+show('Level F test never finished by the child', [
+    it('ENG G - 4 HC'),
+    it('ENG Level F Test', topic='Classwork', status='notdone'),
+    gr('F-30 HC'),
+], 'Gr 3 [2026-2027]')

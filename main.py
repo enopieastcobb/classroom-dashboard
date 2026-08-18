@@ -21,6 +21,7 @@ from typing import List, Dict, Any, Optional
 
 from schedule_service import ScheduleService
 from booklet_tracker import review_student
+from english_tracker import review_student as review_english
 
 # The centre's local clock. Cloud Run runs in UTC, so the handover window has
 # to be worked out in local time or it lands hours off.
@@ -1274,12 +1275,16 @@ async def classroom_dashboard(request: Request):
 
             # Booklet handover check. Runs on the UNFILTERED set, since the
             # booklets it reasons about include work that never reaches the
-            # badges, and only for Maths -- booklets are a Maths idea.
-            if sel_subject == "Math":
+            # badges. Each room has its own checker: the two curricula agree on
+            # almost nothing, so english_tracker is a separate module and a
+            # change to one room cannot disturb the other.
+            checker = {"Math": review_student, "English": review_english}.get(sel_subject)
+            if checker:
                 try:
-                    card["booklets"] = review_student(items, today_local(), card["grade"])
+                    card["booklets"] = checker(items, today_local(), card["grade"])
                 except Exception as e:
-                    logger.error(f"Booklet check failed for '{name}': {e}", exc_info=True)
+                    logger.error(f"Booklet check failed for '{name}' "
+                                 f"({sel_subject}): {e}", exc_info=True)
 
             # Work parked in a Graded topic is finished and out of scope for
             # the session view -- not on the badges and not listed as withheld
@@ -1374,9 +1379,14 @@ async def classroom_dashboard(request: Request):
                     continue
                 b = c.get("booklets") or {}
                 missing, notes = b.get("missing") or [], b.get("notes") or []
+                # A few findings need to stand out from the rest -- a level test
+                # never started, or the same booklet issued twice. They are
+                # carried separately so the banner can mark them rather than
+                # letting them read as one more line among many.
+                severe = b.get("severe") or []
                 if missing or notes:
                     handover_alert.append({"name": c["name"], "missing": missing,
-                                           "notes": notes})
+                                           "notes": notes, "severe": severe})
 
         # Logged on EVERY request, not just when it fires. "The banner didn't
         # appear" has several possible causes -- outside the window, the wrong

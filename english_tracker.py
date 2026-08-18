@@ -317,6 +317,9 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
                 'level': lvl, 'title': title,
                 'score': i.get('score_percent'),
                 'graded': i.get('status') == 'done',
+                # The child has handed it in; only the marking is outstanding.
+                'submitted': (i.get('status') == 'submitted'
+                              or bool(i.get('turned_in'))),
                 'posted_key': i.get('posted_key') or '',
                 'redo': parse_redo_list(i.get('given') or '', title),
                 'advance': parse_advance(i.get('given') or '', title),
@@ -415,19 +418,35 @@ def _test_state(reading, tests, pos) -> Optional[Dict[str, Any]]:
                     'severe': True,
                     'detail': f"level {prev} test missing -- child is already "
                               f"on {pos['level']}-{pos['book']}"}
-        if not finished(prev) and pos['book'] > TEST_TOLERANCE_INTO_NEXT:
-            return {'series': 'ENG', 'kind': 'test_overdue', 'expected': [],
-                    'severe': True,
-                    'detail': f"level {prev} test still unfinished -- child is "
-                              f"already on {pos['level']}-{pos['book']}"}
+        sat = next((t for t in tests if t['level'] == prev), None)
+        if sat and not sat['graded']:
+            # Handed in but unmarked is a different ask from a different person:
+            # the child has done their part and the follow-through is the
+            # teacher's, so it says so rather than reading as a child stuck
+            # mid-test.
+            if sat['submitted']:
+                return {'series': 'ENG', 'kind': 'test_ungraded', 'expected': [],
+                        'severe': False,
+                        'detail': f"level {prev} test NOT GRADED YET"}
+            if pos['book'] > TEST_TOLERANCE_INTO_NEXT:
+                return {'series': 'ENG', 'kind': 'test_overdue', 'expected': [],
+                        'severe': True,
+                        'detail': f"level {prev} test still unfinished -- child "
+                                  f"is already on {pos['level']}-{pos['book']}"}
 
     # The current level: the test should be in place from booklet 28.
-    if pos['book'] >= LEVEL_TEST_DUE_AT_BOOK and not exists(pos['level']):
-        return {'series': 'ENG', 'kind': 'test_missing', 'expected': [],
-                'severe': True,
-                'detail': f"level {pos['level']} test missing -- child is at "
-                          f"booklet {pos['book']}, it should have started at "
-                          f"{LEVEL_TEST_DUE_AT_BOOK}"}
+    if pos['book'] >= LEVEL_TEST_DUE_AT_BOOK:
+        if not exists(pos['level']):
+            return {'series': 'ENG', 'kind': 'test_missing', 'expected': [],
+                    'severe': True,
+                    'detail': f"level {pos['level']} test missing -- child is at "
+                              f"booklet {pos['book']}, it should have started at "
+                              f"{LEVEL_TEST_DUE_AT_BOOK}"}
+        here = next((t for t in tests if t['level'] == pos['level']), None)
+        if here and not here['graded'] and here['submitted']:
+            return {'series': 'ENG', 'kind': 'test_ungraded', 'expected': [],
+                    'severe': False,
+                    'detail': f"level {pos['level']} test NOT GRADED YET"}
 
     # Sat and failed, with no decision recorded either way.
     for t in tests:
