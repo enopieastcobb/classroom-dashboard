@@ -1,0 +1,371 @@
+<title>Booklet Naming Standard</title>
+<style>
+  /* Light palette is the complete set; dark blocks below redefine tokens only. */
+  :root {
+    --paper:      #F4F6F8;
+    --card:       #FFFFFF;
+    --ink:        #16202C;
+    --ink-soft:   #4A5768;
+    --ink-faint:  #7C889A;
+    --rule:       #D8DEE6;
+    --rule-soft:  #E7EBF0;
+    --accent:     #2F4B7C;
+    --accent-bg:  #E8EDF5;
+    --good:       #2E6B4F;
+    --good-bg:    #E6EFE9;
+    --bad:        #A8402F;
+    --bad-bg:     #F7E8E5;
+
+    --serif: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #131A22;
+      --card:      #1B242F;
+      --ink:       #E6EBF1;
+      --ink-soft:  #A9B5C4;
+      --ink-faint: #7C889A;
+      --rule:      #2E3A48;
+      --rule-soft: #232E3A;
+      --accent:    #9CBBEA;
+      --accent-bg: #1E2B3E;
+      --good:      #7FC79E;
+      --good-bg:   #1A2A22;
+      --bad:       #E79A88;
+      --bad-bg:    #2E1F1C;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:     #131A22;
+    --card:      #1B242F;
+    --ink:       #E6EBF1;
+    --ink-soft:  #A9B5C4;
+    --ink-faint: #7C889A;
+    --rule:      #2E3A48;
+    --rule-soft: #232E3A;
+    --accent:    #9CBBEA;
+    --accent-bg: #1E2B3E;
+    --good:      #7FC79E;
+    --good-bg:   #1A2A22;
+    --bad:       #E79A88;
+    --bad-bg:    #2E1F1C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  .wrap {
+    max-width: 54rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.75rem;
+  }
+
+  /* --- masthead --- */
+  .masthead { display: flex; flex-direction: column; gap: .75rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(2rem, 5vw, 2.9rem);
+    line-height: 1.1;
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: -.015em;
+  }
+  .standfirst {
+    font-size: 1.05rem;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 42rem;
+  }
+
+  /* --- the grammar line: a synopsis, like a man page --- */
+  .synopsis {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: 1.5rem 1.5rem 1.25rem;
+    overflow-x: auto;
+  }
+  .synopsis-line {
+    font-family: var(--mono);
+    font-size: clamp(.85rem, 2.4vw, 1.05rem);
+    white-space: nowrap;
+    margin: 0 0 1rem;
+  }
+  .synopsis-line + .synopsis-line { margin-top: -.4rem; }
+  .req { color: var(--accent); font-weight: 600; }
+  .opt { color: var(--ink-faint); }
+  .key {
+    display: flex; flex-wrap: wrap; gap: .4rem 1.25rem;
+    font-size: .8rem; color: var(--ink-soft);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: .9rem; margin: 0;
+  }
+  .key span { white-space: nowrap; }
+  .key b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+
+  /* --- sections --- */
+  section { display: flex; flex-direction: column; gap: .9rem; }
+  h2 {
+    font-family: var(--serif);
+    font-size: 1.3rem; font-weight: 600; margin: 0;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--rule);
+    letter-spacing: -.01em;
+  }
+  .note { color: var(--ink-soft); font-size: .93rem; margin: 0; max-width: 44rem; }
+
+  .scroll { overflow-x: auto; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: .92rem;
+    min-width: 30rem;
+  }
+  th {
+    text-align: left; font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 500;
+    padding: 0 .9rem .55rem 0; border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: .7rem .9rem .7rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code {
+    font-family: var(--mono); font-size: .88em;
+    background: var(--accent-bg); color: var(--ink);
+    padding: .12em .4em; border-radius: 2px;
+    white-space: nowrap;
+  }
+  td code { background: none; padding: 0; font-weight: 600; }
+
+  /* --- examples: right and wrong, distinguished by form not just colour --- */
+  .examples { display: grid; gap: .5rem; }
+  .ex {
+    display: grid; grid-template-columns: 1.5rem 1fr; gap: .1rem .7rem;
+    align-items: baseline;
+    background: var(--card); border: 1px solid var(--rule);
+    padding: .8rem 1rem;
+  }
+  .ex-mark { font-family: var(--mono); font-weight: 700; }
+  .ex-yes { border-left: 3px solid var(--good); }
+  .ex-yes .ex-mark { color: var(--good); }
+  .ex-no  { border-left: 3px solid var(--bad); }
+  .ex-no  .ex-mark { color: var(--bad); }
+  .ex-title {
+    font-family: var(--mono); font-size: .92rem; font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .ex-why { grid-column: 2; font-size: .87rem; color: var(--ink-soft); }
+  .ex-no .ex-title { text-decoration: line-through; text-decoration-color: var(--bad); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.25rem;
+    font-size: .86rem; color: var(--ink-faint);
+  }
+  footer p { margin: 0 0 .5rem; }
+  a { color: var(--accent); }
+  a:focus-visible, code:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Enopi East Cobb · Google Classroom</div>
+    <h1>Booklet Naming Standard</h1>
+    <p class="standfirst">How to title a booklet assignment so the session dashboard can tell
+      which book it is, which child it belongs to, and whether one has been missed.</p>
+  </header>
+
+  <div class="synopsis">
+    <p class="synopsis-line">
+      <span class="opt">[</span><span class="opt">REDO</span><span class="opt">|</span><span class="opt">REISSUE</span><span class="opt">]</span>
+      <span class="req">SERIES</span>
+      <span class="req">level</span><span class="req">-</span><span class="req">booklet</span>
+      <span class="opt">[HC]</span> <span class="opt">[FIC]</span>
+    </p>
+    <p class="synopsis-line">
+      <span class="req">TEST:</span> <span class="req">SERIES</span> <span class="req">Level</span> <span class="req">level</span>
+    </p>
+    <p class="key">
+      <span><b class="req">blue</b> required</span>
+      <span><b class="opt">grey</b> only when it applies</span>
+      <span><b>[ ]</b> optional</span>
+      <span><b>|</b> one or the other</span>
+    </p>
+  </div>
+
+  <section>
+    <h2>Series — always name one</h2>
+    <p class="note">The series tells the dashboard which curriculum a booklet belongs to. Without it,
+      a title like <code>6-12 HC</code> could be maths or English, and the dashboard has to guess.</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Prefix</th><th>Series</th><th>Levels</th><th>Booklets in a level</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>BTM</code></td><td>Basic Thinking Maths</td>
+            <td class="num">1 – 24</td><td class="num">1 – 18</td>
+          </tr>
+          <tr>
+            <td><code>CTM</code></td><td>Critical Thinking Maths</td>
+            <td class="num">1 – 24</td><td class="num">19 – 30</td>
+          </tr>
+          <tr>
+            <td><code>ENG</code></td><td>English reading</td>
+            <td class="num">A–I, then 6, 7, 8</td><td class="num">1 – 30</td>
+          </tr>
+          <tr>
+            <td><code>Essay Writing:</code></td><td>English writing</td>
+            <td class="num">A – M</td><td class="num">1 in A–E · 4 from F</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Modifiers — in front of the series</h2>
+    <p class="note">A booklet appearing twice is normally a mistake, and the dashboard flags it.
+      These two prefixes say the repeat was deliberate, so it passes quietly.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Prefix</th><th>Use it when</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>REDO</code></td>
+            <td>The child is redoing the booklet after a failed level test</td>
+            <td>Repeat allowed</td>
+          </tr>
+          <tr>
+            <td><code>REISSUE</code></td>
+            <td>The physical book was lost and you are replacing it</td>
+            <td>Repeat allowed</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Markers — after the number</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Marker</th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td><code>HC</code></td><td>Hard copy — the physical book was handed over</td></tr>
+          <tr><td><code>FIC</code></td><td>Fix in class — sit with the child before the next booklet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Level tests</h2>
+    <p class="note">Naming the series matters here too: maths has a Basic and a Critical test at the
+      same level, and <code>Level 6</code> exists in both rooms.</p>
+    <div class="examples">
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">TEST: BTM Level 18</span>
+        <span class="ex-why">Maths, basic thinking</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">TEST: CTM Level 12</span>
+        <span class="ex-why">Maths, critical thinking — a different test from BTM Level 12</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">TEST: ENG Level I</span>
+        <span class="ex-why">English reading</span>
+      </div>
+    </div>
+    <p class="note">In the test's <b>description</b>, record the outcome when a child does not pass:
+      <code>REDO: 12-19, 12-20, 12-22</code> lists the booklets to repeat, and
+      <code>ADVANCE: covered long division twice already</code> records a decision to move on anyway.
+      Put these in the description, not the comments — the dashboard cannot read comments.</p>
+  </section>
+
+  <section>
+    <h2>Worked examples</h2>
+    <div class="examples">
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">BTM 15-17 HC</span>
+        <span class="ex-why">Maths basic, level 15, booklet 17, physical book handed over</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">ENG I-23 HC</span>
+        <span class="ex-why">English reading, level I, booklet 23</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">ENG H - 4 HC FIC</span>
+        <span class="ex-why">Spacing around the hyphen is fine</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">Essay Writing: F-1 HC</span>
+        <span class="ex-why">English writing booklet, level F, booklet 1</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">REDO BTM 12-9 HC</span>
+        <span class="ex-why">Repeating booklet 9 after the level 12 test — series still named</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">REISSUE ENG F-12 HC</span>
+        <span class="ex-why">Replacing a lost book</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Three mistakes that break it</h2>
+    <div class="examples">
+      <div class="ex ex-no">
+        <span class="ex-mark">✕</span><span class="ex-title">REDO 12-9 HC</span>
+        <span class="ex-why">The series is missing, so the booklet becomes invisible to the
+          dashboard — worse than no prefix at all. Write <code>REDO BTM 12-9 HC</code>.</span>
+      </div>
+      <div class="ex ex-no">
+        <span class="ex-mark">✕</span><span class="ex-title">6-12 HC</span>
+        <span class="ex-why">Level 6 exists in both maths and English, so the room cannot be told
+          from the title. Write <code>BTM 6-12 HC</code> or <code>ENG 6-12 HC</code>.</span>
+      </div>
+      <div class="ex ex-no">
+        <span class="ex-mark">✕</span><span class="ex-title">F1 Essay Writing Aug Sept - 2026</span>
+        <span class="ex-why">The old writing-booklet style. Write
+          <code>Essay Writing: F-1 HC</code> instead.</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>One more thing that isn't about naming:</b> a booklet left as a <b>Draft</b> in Classroom
+      is invisible to the child, so the dashboard treats it as not handed over and will flag it.
+      Publish it before the session ends.</p>
+    <p>Titles created before this standard are still recognised, so there is nothing to rename.
+      This applies to new assignments only.</p>
+  </footer>
+
+</div>
