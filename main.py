@@ -1390,9 +1390,24 @@ async def classroom_dashboard(request: Request):
                 # carried separately so the banner can mark them rather than
                 # letting them read as one more line among many.
                 severe = b.get("severe") or []
-                if missing or notes:
-                    handover_alert.append({"name": c["name"], "missing": missing,
-                                           "notes": notes, "severe": severe})
+                if not (missing or notes):
+                    continue
+                # One line per student, however many times the schedule lists
+                # them. A child rostered under two teachers in the same hour
+                # gets two cards, and printing their findings once per card put
+                # Niyam Shah's three duplicate booklets in the banner twice --
+                # doubling the length of the very list a teacher has to scan.
+                seen = next((a for a in handover_alert
+                             if a["name"] == c["name"]), None)
+                if seen is None:
+                    handover_alert.append({"name": c["name"], "missing": [],
+                                           "notes": [], "severe": []})
+                    seen = handover_alert[-1]
+                for key, values in (("missing", missing), ("notes", notes),
+                                    ("severe", severe)):
+                    for v in values:
+                        if v not in seen[key]:
+                            seen[key].append(v)
 
         # Logged on EVERY request, not just when it fires. "The banner didn't
         # appear" has several possible causes -- outside the window, the wrong
