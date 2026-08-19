@@ -139,3 +139,28 @@ show('Level F test never finished by the child', [
     it('ENG Level F Test', topic='Classwork', status='notdone'),
     gr('F-30 HC'),
 ], 'Gr 3 [2026-2027]')
+
+# Shrey Patel, as confirmed by the centre: English H-29, never at level 8. The
+# 8-30 and 6-8 in his shared Graded topic are MATHS booklets from years ago,
+# and reading them as English put him at a position no child in the centre
+# holds -- which then named a wrong next booklet and invented a missing test.
+def old(t, p):
+    return it(t, topic='Graded Assignments', subject=None, status='done',
+              turned_in=True, score=90, posted=p)
+
+
+show('Shrey Patel - H-29, old maths 6/8 must not become English', [
+    old('8-30 HC', '2023-05-01'), old('6-8 HC', '2023-02-01'),
+    old('G-28 HC', '2025-11-01'), old('G-28 HC', '2025-11-08'),
+    old('E-26 HC', '2024-09-01'), old('E-26 HC', '2024-09-08'),
+    old('H-27 HC', '2026-07-20'), old('H-28 HC', '2026-08-05'),
+    it('ENG H - 29 HC', posted='2026-08-19'),
+], 'Gr 3 [2026-2027]')
+
+# Spoorthi: duplicates from levels she finished years ago must stay quiet.
+show('Spoorthi - old finished duplicates, now on G-12', [
+    old('B-25 HC', '2023-01-01'), old('B-25 HC', '2023-01-08'),
+    old('C-11 HC', '2023-06-01'), old('C-11 HC', '2023-06-08'),
+    old('G-10 HC', '2026-07-22'), old('G - 11 HC', '2026-08-01'),
+    it('ENG G - 12 HC', posted='2026-08-12'),
+], 'Gr 3 [2026-2027]')
