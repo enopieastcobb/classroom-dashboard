@@ -272,13 +272,18 @@ def resolve_ambiguous_level(level: str, grade: Optional[int],
     while maths 6-8 sit EARLY in a twenty-four-level ladder and belong to a child
     below grade 3.
 
-    Maths by default. English only when the grade agrees AND the student's
-    English history independently reaches that far -- requiring both keeps a
-    grade-3 child who is simply behind in maths from being misread.
+    Maths, always. The grade signal is real but not strong enough on its own:
+    Shrey Patel was read as being at English 8-30, a position no child in the
+    centre holds, because his maths booklets at these levels were pulled across
+    on a grade-3 match. A wrong position is worse than a missing one -- it names
+    the wrong next booklet and invents a missing level test.
+
+    An ENG prefix settles it, so nothing issued under the naming standard is
+    affected. The cost falls only on a child genuinely at English 6-8 whose OLD
+    booklets were never labelled: their history reads short. That is the safer
+    direction to be wrong in.
     """
-    if level not in ('6', '7', '8'):
-        return True
-    return english_trace and grade is not None and 3 <= grade <= 4
+    return level not in ('6', '7', '8')
 
 
 def _position(reading: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -367,6 +372,13 @@ def _duplicates(reading: List[Dict[str, Any]],
     week after week, so anything carrying REDO or REISSUE, or named on its own
     level's redo list, is exempt. Without that exemption every correctly-handled
     failed test would accuse the teacher who did the right thing.
+
+    Only repeats the child is STILL HOLDING count. A booklet issued twice years
+    ago and finished both times is not something anyone can act on now -- and
+    Classroom keeps every assignment ever made, so judging all of history buried
+    the real findings under levels the child left behind. Spoorthi, working
+    through level G, was flagged for B-25, B-29 and C-11. What matters is a
+    booklet in the child's hands today that they have already done.
     """
     redo_set = {(lvl, bk) for t in tests for lvl, bk in t['redo']}
     counts: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
@@ -378,6 +390,8 @@ def _duplicates(reading: List[Dict[str, Any]],
         if len(group) < 2:
             continue
         if (lvl, book) in redo_set or any(b['exempt'] for b in group):
+            continue
+        if not any(b['outstanding'] for b in group):
             continue
         out.append({'series': 'ENG', 'kind': 'duplicate', 'expected': [],
                     'severe': True,
