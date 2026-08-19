@@ -467,6 +467,11 @@ class DataProcessor:
         title = meta.get('title') or ''
         topic_name = topic_by_id.get(meta.get('topicId')) or ''
         subject, topic, category = DataProcessor._subject_and_topic(topic_name, title)
+        # Whether the topic NAMED the subject, or it was guessed from the title.
+        # "Graded Assignments" holds both rooms' work and names neither, so the
+        # subject there is inference and defaults to English -- which quietly
+        # handed maths booklets at levels 6, 7 and 8 to the English checker.
+        subject_stated = bool(re.search(r'english|math', topic_name or '', re.I))
         strand = DataProcessor.parse_strand(title)
         # Problem of the Day is Maths classwork wherever it happens to be
         # filed, so the strand overrides whatever the topic name implied.
@@ -524,6 +529,7 @@ class DataProcessor:
         return {
             "title": title,
             "subject": subject,
+            "subject_stated": subject_stated,
             "topic": topic,
             "category": category,
             "status": status,

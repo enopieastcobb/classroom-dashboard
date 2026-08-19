@@ -318,7 +318,12 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
         topic = i.get('topic')
         if not carries_booklets(topic):
             continue
-        subject_known = i.get('subject') == 'English'
+        # Only a topic that NAMES English settles the room. In the shared
+        # Graded topic the subject is guessed from the title and defaults to
+        # English, so trusting it there is what let maths levels 6, 7 and 8
+        # through as English booklets.
+        subject_known = (i.get('subject') == 'English'
+                         and bool(i.get('subject_stated')))
         shared_graded = bool(GRADED_TOPIC_RE.search(_norm_topic(topic)))
         if not subject_known and not shared_graded:
             continue

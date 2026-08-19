@@ -164,3 +164,32 @@ show('Spoorthi - old finished duplicates, now on G-12', [
     old('G-10 HC', '2026-07-22'), old('G - 11 HC', '2026-08-01'),
     it('ENG G - 12 HC', posted='2026-08-12'),
 ], 'Gr 3 [2026-2027]')
+
+# --- the shared Graded topic names no subject -------------------------------
+# main.py guesses it from the title and DEFAULTS TO ENGLISH, which handed maths
+# booklets at levels 6, 7 and 8 straight to the English checker. All four of
+# these are real students from the 5pm Wednesday English banner.
+def guessed(t, p='2026-06-01'):
+    """Graded Assignments: subject inferred, not stated."""
+    return {'title': t, 'topic': 'Graded Assignments', 'subject': 'English',
+            'subject_stated': False, 'status': 'done', 'turned_in': True,
+            'score_percent': 90, 'posted_key': p}
+
+
+def eng(t, topic='Homework', posted='2026-08-12', status='notdone'):
+    return {'title': t, 'topic': topic, 'subject': 'English',
+            'subject_stated': True, 'status': status, 'turned_in': False,
+            'score_percent': None, 'posted_key': posted}
+
+
+show('Adhvika D - maths CTM 7-30 must not read as English',
+     [guessed('7-30 HC'), guessed('7-29 HC'), eng('ENG E-12 HC')],
+     'Gr 2 [2026-2027]')
+show('Amelia - maths 7-5 must not read as English',
+     [guessed('7-5 HC'), guessed('6-30 HC'), eng('ENG D-13 hc')],
+     'Gr 2 [2026-2027]')
+show('Anaya Shah - maths 8-2 must not read as English',
+     [guessed('8-2 HC'), eng('ENG C-4 HC')], 'Gr 1 [2026-2027]')
+show('Rida - English letter levels still work',
+     [guessed('E-29 HC'), guessed('E-30 HC'), eng('ENG F - 3 HC')],
+     'Gr 3 [2026-2027]')
