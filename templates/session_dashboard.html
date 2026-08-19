@@ -265,6 +265,13 @@
 </p>
 {% endif %}
 
+{% if duplicate_students %}
+<p style="font-size:12px; margin:-6px 0 12px; color:#8a2020;">
+  Listed twice in this hour on the schedule sheet:
+  <b>{{ duplicate_students | join(', ') }}</b> — worth removing the extra row.
+</p>
+{% endif %}
+
 {% for g in groups %}
 <div class="group" data-group>
   <div class="group-tab"><span>{{ g.teacher }}</span></div>

@@ -246,12 +246,20 @@ def _running_parallel(btm: List[Dict[str, Any]]) -> bool:
     18 has already started is something sequential progression cannot produce,
     since 18 only opens once 17 is complete and its test passed. A child who
     finished 17 the ordinary way and moved on to 18 therefore does not trip it.
+
+    BOTH tracks must still be unfinished. Reaching booklet 18 of either one ends
+    the run: the child moves to that level's test and on to the next level, and
+    whatever is left in the other track is closed rather than carried. Avyuth K
+    had finished 18-18 with level 17 stopped at 14 months earlier, and topping
+    his week up from the dormant track asked for 17-15 and 17-16 -- booklets
+    from a level he had left behind.
     """
     lo, hi = PARALLEL_LEVELS
     levels = {b['level'] for b in btm}
     if not {lo, hi} <= levels:
         return False
-    return max(b['book'] for b in btm if b['level'] == lo) < BTM_LAST
+    return all(max(b['book'] for b in btm if b['level'] == lv) < BTM_LAST
+               for lv in (lo, hi))
 
 
 def next_booklet(level: int, book: int, series: str, levels_done=()):

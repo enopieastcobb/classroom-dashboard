@@ -1066,11 +1066,17 @@ def simulated_now(raw: str) -> Optional[datetime]:
 def in_handover_window(session_time: str, session_date: Optional[date],
                        now: Optional[datetime] = None) -> bool:
     """
-    Whether we are in the last ten minutes of THIS session, on its own day.
+    Whether this session's handover alert should be showing.
+
+    It opens ten minutes before the session ends -- late enough that a teacher
+    has had the lesson to hand books over, early enough to put right before the
+    child leaves -- and then stays up for the REST OF THE DAY. A booklet still
+    missing at 6pm is just as missing at 8pm, and closing the alert when the
+    hour ends would hide the problem from whoever could still fix it.
 
     Checking the date as well as the clock matters: the schedule repeats
     weekly, so without it a Tuesday 5pm session would raise its alert every
-    weekday at 5:50.
+    weekday evening.
     """
     now = now or (now_local())
     if session_date and now.date() != session_date:
@@ -1079,6 +1085,8 @@ def in_handover_window(session_time: str, session_date: Optional[date],
         start = datetime.strptime(session_time.strip(), "%I:%M %p")
     except (ValueError, AttributeError):
         return False
+    if now.hour > start.hour:
+        return True
     return now.hour == start.hour and now.minute >= HANDOVER_ALERT_FROM_MINUTE
 
 
@@ -1365,6 +1373,13 @@ async def classroom_dashboard(request: Request):
             "unmatched": sum(1 for c in cards if c["state"] == "unmatched"),
             "errors": sum(1 for c in cards if c["state"] == "error"),
         }
+        # A child rostered twice in one hour -- usually the same name entered
+        # under two teachers in the schedule Sheet. The banner merges their
+        # findings, but silently absorbing it would leave the Sheet wrong
+        # indefinitely, so it is named where an admin will see it.
+        _names = [c["name"] for c in cards]
+        ctx["duplicate_students"] = sorted(
+            {n for n in _names if _names.count(n) > 1})
         # Only raised in the last ten minutes of the session, so it reads as a
         # last call before the child leaves rather than nagging all lesson --
         # a teacher legitimately hands the booklets over at the end.
