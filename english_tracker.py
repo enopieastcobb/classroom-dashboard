@@ -22,6 +22,7 @@ Shape of the English curriculum:
 """
 import logging
 import re
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,13 @@ LEVEL_TEST_PASS = 80
 # stops being evidence. Measured from booklet 28 of the level the test belongs
 # to, which puts the last booklet still worth mentioning at 8 of the next level.
 TEST_LOOKBACK_BOOKLETS = 10
+
+# How far back a duplicated booklet is worth reporting. Classroom keeps every
+# assignment ever made, so without a bound the check reaches into levels a child
+# left years ago -- Spoorthi, working through level G, was flagged for B-25 and
+# C-11. Ten weeks is roughly ten booklets at one a week, matching the reach of
+# the level-test check above.
+DUPLICATE_LOOKBACK_WEEKS = 10
 
 BOOKLET_TOPICS = ('classwork', 'homework')
 GRADED_TOPIC_RE = re.compile(r'graded', re.IGNORECASE)
@@ -345,6 +353,7 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
                                 and not i.get('turned_in')),
                 'exempt': bool(REDO_PREFIX_RE.search(title)
                                or REISSUE_RE.search(title)),
+                'posted_key': i.get('posted_key') or '',
             }
             # Undecidable only when unlabelled, at 6/7/8, and with no subject on
             # the topic to settle it.
@@ -363,8 +372,8 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
     return reading, writing, tests
 
 
-def _duplicates(reading: List[Dict[str, Any]],
-                tests: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _duplicates(reading: List[Dict[str, Any]], tests: List[Dict[str, Any]],
+                today=None) -> List[Dict[str, Any]]:
     """
     Booklets issued more than once without a reason.
 
@@ -379,7 +388,14 @@ def _duplicates(reading: List[Dict[str, Any]],
     the real findings under levels the child left behind. Spoorthi, working
     through level G, was flagged for B-25, B-29 and C-11. What matters is a
     booklet in the child's hands today that they have already done.
+
+    Bounded in time as well: a copy has to have been issued within the last ten
+    weeks. The two conditions catch different halves of the same mistake -- one
+    that the child is holding it, one that it happened recently enough to act on.
     """
+    cutoff = ''
+    if today is not None:
+        cutoff = (today - timedelta(weeks=DUPLICATE_LOOKBACK_WEEKS)).isoformat()
     redo_set = {(lvl, bk) for t in tests for lvl, bk in t['redo']}
     counts: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
     for b in reading:
@@ -392,6 +408,11 @@ def _duplicates(reading: List[Dict[str, Any]],
         if (lvl, book) in redo_set or any(b['exempt'] for b in group):
             continue
         if not any(b['outstanding'] for b in group):
+            continue
+        # ISO dates compare correctly as strings. A booklet with no posted date
+        # is kept rather than dropped -- absence of a date is not evidence of age.
+        if cutoff and not any(not b['posted_key'] or b['posted_key'] >= cutoff
+                              for b in group):
             continue
         out.append({'series': 'ENG', 'kind': 'duplicate', 'expected': [],
                     'severe': True,
@@ -538,7 +559,7 @@ def review_student(items: List[Dict[str, Any]], today=None,
                 'detail': f"grade {grade} and still on English booklets"})
         return _result(findings)
 
-    findings.extend(_duplicates(reading, tests))
+    findings.extend(_duplicates(reading, tests, today))
 
     if reading:
         pos = _position(reading)

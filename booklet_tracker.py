@@ -18,7 +18,7 @@ Curriculum shape:
 """
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,18 @@ SWAPPABLE_LEVELS = frozenset({15, 16})
 # flagged from here. What the alert catches is a child already running both
 # tracks who was handed nothing for one of them.
 PARALLEL_LEVELS = (17, 18)
+
+# How far back a duplicated booklet is worth reporting. Classroom keeps every
+# assignment ever made, so without a bound the check reaches into levels a child
+# left years ago. Ten weeks matches the English rule, where one booklet a week
+# makes ten booklets and ten weeks the same span.
+DUPLICATE_LOOKBACK_WEEKS = 10
+
+# The same booklet issued twice is an error -- except when it was meant. A redo
+# set is deliberately reassigned week after week, and a lost book has to be
+# replaced, so both say so in the title.
+REDO_PREFIX_RE = re.compile(r'\bREDO\b', re.IGNORECASE)
+REISSUE_RE = re.compile(r'\bREISSUE\b', re.IGNORECASE)
 
 # Once a child is this far into a level's basic thinking run, the level's
 # supplementary packet should already have been issued. Catching it here means
@@ -311,6 +323,8 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'outstanding': (i.get('status') in ('notdone', 'fic')
                                 and not i.get('turned_in')),
                 'posted_key': i.get('posted_key') or '',
+                'exempt': bool(REDO_PREFIX_RE.search(title)
+                               or REISSUE_RE.search(title)),
             })
             continue
         t = LEVEL_TEST_RE.search(title)
@@ -333,6 +347,7 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
             })
 
     findings = []
+    findings.extend(_duplicates(booklets, level_tests, today))
 
     # A child young enough to be on the booklet curriculum with no booklet work
     # at all is a finding in itself, not a quiet pass. (Grade was resolved
@@ -509,8 +524,56 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                                    # A failed test with no redo set listed is a
                                    # dead end: nothing will be assigned until a
                                    # grader says what to redo.
-                                   'level_test_failed', 'level_test_ungraded')],
+                                   'level_test_failed', 'level_test_ungraded',
+                                   'duplicate')],
+        # Marked out in the banner: a mistake rather than a booklet simply not
+        # handed over yet.
+        'severe': [f['detail'] for f in deduped if f.get('severe')],
     }
+
+
+def _duplicates(booklets, level_tests, today=None):
+    """
+    Booklets issued more than once without a reason.
+
+    Three ways a repeat is legitimate: a REDO prefix, a REISSUE prefix, or the
+    booklet being named on its own level's redo list. Redo sets are reassigned
+    one a week until cleared, so without those exemptions every correctly
+    handled failed test would accuse the teacher who did the right thing.
+
+    Bounded twice over. The child must still be HOLDING a copy -- a booklet
+    issued twice years ago and finished both times is not something anyone can
+    act on now. And a copy must have been issued within the last ten weeks, so
+    the check cannot reach back into levels the child has long left.
+    """
+    cutoff = ''
+    if today is not None:
+        cutoff = (today - timedelta(weeks=DUPLICATE_LOOKBACK_WEEKS)).isoformat()
+    redo_set = {(t['level'], r['level'], r['book'])
+                for t in level_tests for r in t.get('redo') or []}
+    redo_flat = {(lvl, bk) for _, lvl, bk in redo_set}
+
+    counts = {}
+    for b in booklets:
+        counts.setdefault((b['series'], b['level'], b['book']), []).append(b)
+
+    out = []
+    for (series, lvl, book), group in sorted(counts.items()):
+        if len(group) < 2:
+            continue
+        if (lvl, book) in redo_flat or any(b.get('exempt') for b in group):
+            continue
+        if not any(b['outstanding'] for b in group):
+            continue
+        # ISO dates compare correctly as strings. A booklet with no posted date
+        # is kept -- absence of a date is not evidence of age.
+        if cutoff and not any(not b['posted_key'] or b['posted_key'] >= cutoff
+                              for b in group):
+            continue
+        out.append({'series': series, 'kind': 'duplicate', 'expected': [],
+                    'severe': True,
+                    'detail': f"{lvl}-{book} assigned {len(group)} times"})
+    return out
 
 
 def _pending_redo(level_tests, level, series, in_series) -> List[Dict[str, int]]:
