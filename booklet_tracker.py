@@ -215,7 +215,13 @@ def parse_redo_list(*sources: str) -> List[Dict[str, int]]:
         if found:
             return found
     return []
-GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
+# "Gr 4 [2026-2027]" is the house style, but a stray full stop or hyphen would
+# otherwise make the grade unreadable and skip the child entirely, so both are
+# tolerated -- as is the reversed "1st Grade" form.
+GRADE_RE = re.compile(
+    r'\bGr(?:ade)?\.?\s*-?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
+ORDINAL_GRADE_RE = re.compile(
+    r'\b(?P<grade>\d{1,2})\s*(?:st|nd|rd|th)\s*grade\b', re.IGNORECASE)
 
 # Sections below grade 1 are named, not numbered: "Gr K", "Pre-K", and
 # "Weenopi" for the three- and four-year-olds. GRADE_RE only reads digits, so
@@ -247,7 +253,7 @@ def grade_number(section: str) -> Optional[int]:
         return GRADE_PREK
     if K_RE.search(section):
         return GRADE_K
-    m = GRADE_RE.search(section)
+    m = GRADE_RE.search(section) or ORDINAL_GRADE_RE.search(section)
     return int(m.group('grade')) if m else None
 
 

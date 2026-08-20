@@ -79,7 +79,14 @@ from booklet_tracker import grade_number as math_grade
 
 GRADES = {'Weenopi': -2, 'Weenopi [2026-2027]': -2, 'Pre-K': -1, 'Pre K': -1,
           'PreK': -1, 'Gr K': 0, 'Grade K': 0, 'KG': 0, 'Kindergarten': 0,
-          'Gr 1[2026-2027]': 1, 'Gr 4 [2026-2027]': 4, 'Gr 7/8 [2026-2027]': 7}
+          'Gr 1[2026-2027]': 1, 'Gr 4 [2026-2027]': 4, 'Gr 7/8 [2026-2027]': 7,
+          # "Gr" and "Grade" are the same thing, and a stray full stop or
+          # hyphen must not make a child's grade unreadable.
+          'Grade 1': 1, 'gr 1': 1, 'Gr1': 1, 'Gr. 1': 1, 'Grade. 1': 1,
+          'Gr-1': 1, 'Grade-1': 1, 'Gr  1': 1, '1st Grade': 1, '1st grade': 1,
+          'Grade 4 [2026-2027]': 4,
+          # ...but a word merely starting with "Gr" is not a grade.
+          'Group 1': None, '': None}
 bad = [f'{s!r} -> english={eng_grade(s)} maths={math_grade(s)} want {want}'
        for s, want in GRADES.items()
        if eng_grade(s) != want or math_grade(s) != want]
