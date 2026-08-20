@@ -48,11 +48,11 @@ results = [
           niyam + [graded('REISSUE BTM 11-8 HC', '2026-08-01')], []),
     check('REISSUED past tense also exempts',
           niyam + [graded('REISSUED BTM 11-8 HC', '2026-08-01')], []),
-    # REASSIGN goes on the row that already exists -- no new book, no new
-    # record -- so two REASSIGN rows for one booklet is a real mistake and
+    # FINISH goes on the row that already exists -- no new book, no new
+    # record -- so two FINISH rows for one booklet is a real mistake and
     # must NOT be forgiven the way REDO and REISSUE are.
-    check('REASSIGN does NOT exempt: it should be one row',
-          niyam + [graded('REASSIGN BTM 11-8 HC', '2026-08-01')],
+    check('FINISH does NOT exempt: it should be one row',
+          niyam + [graded('FINISH BTM 11-8 HC', '2026-08-01')],
           ['11-8 assigned 2 times']),
     # The ten-week bound is about the PAIR being stale, not the older copy.
     # A booklet in the child's hands today that they finished in January is

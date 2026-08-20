@@ -115,9 +115,9 @@ DUPLICATE_LOOKBACK_WEEKS = 10
 #   REISSUE   -- the physical book was lost, so a SECOND book was handed over
 # Both genuinely produce two records, so both have to be forgiven.
 #
-# REASSIGN is deliberately NOT here. A booklet that came back unfinished gets
+# FINISH is deliberately NOT here. A booklet that came back unfinished gets
 # another week by editing the row that already exists -- no new book, no new
-# record. So a REASSIGN title appearing twice is a real mistake, and exempting
+# record. So a FINISH title appearing twice is a real mistake, and exempting
 # it would hide exactly what the check is for.
 # Past-tense forms are accepted, since that is how people write.
 DELIBERATE_REPEAT_RE = re.compile(

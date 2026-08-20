@@ -202,7 +202,7 @@
 
   <div class="synopsis">
     <p class="synopsis-line">
-      <span class="opt">[</span><span class="opt">REDO</span><span class="opt">|</span><span class="opt">REISSUE</span><span class="opt">|</span><span class="opt">REASSIGN</span><span class="opt">]</span>
+      <span class="opt">[</span><span class="opt">REDO</span><span class="opt">|</span><span class="opt">REISSUE</span><span class="opt">|</span><span class="opt">FINISH</span><span class="opt">]</span>
       <span class="req">SERIES</span>
       <span class="req">level</span><span class="req">-</span><span class="req">booklet</span>
       <span class="opt">[HC]</span> <span class="opt">[FIC]</span>
@@ -253,7 +253,7 @@
     <h2>Modifiers — in front of the series</h2>
     <p class="note">A booklet appearing twice is normally a mistake, and the dashboard flags it.
       <code>REDO</code> and <code>REISSUE</code> say a second book genuinely was handed over,
-      so those pass quietly. <code>REASSIGN</code> is different: it goes on the row that
+      so those pass quietly. <code>FINISH</code> is different: it goes on the row that
       already exists, so there should never be two.</p>
     <div class="scroll">
       <table>
@@ -270,7 +270,7 @@
             <td><b>New assignment</b> — a second book really was given, so both rows stay</td>
           </tr>
           <tr>
-            <td><code>REASSIGN</code></td>
+            <td><code>FINISH</code></td>
             <td>The child did not finish it and gets another week to turn it in</td>
             <td><b>Edit the existing row</b> — no new book, so no new assignment</td>
           </tr>
@@ -344,7 +344,7 @@
         <span class="ex-why">Replacing a lost book</span>
       </div>
       <div class="ex ex-yes">
-        <span class="ex-mark">✓</span><span class="ex-title">REASSIGN ENG G-12 HC</span>
+        <span class="ex-mark">✓</span><span class="ex-title">FINISH ENG G-12 HC</span>
         <span class="ex-why">Last week's booklet came back unfinished — another week to
           turn it in. Add the prefix to the row that is already there; do not create a
           second one, because no second book was handed over.</span>
@@ -358,7 +358,9 @@
       <div class="ex ex-no">
         <span class="ex-mark">✕</span><span class="ex-title">REDO 12-9 HC</span>
         <span class="ex-why">The series is missing, so the booklet becomes invisible to the
-          dashboard — worse than no prefix at all. Write <code>REDO BTM 12-9 HC</code>.</span>
+          dashboard — worse than no prefix at all. Write <code>REDO BTM 12-9 HC</code>. The
+          same goes for <code>REISSUE</code> and <code>FINISH</code>: the modifier goes in
+          front of the series, never instead of it.</span>
       </div>
       <div class="ex ex-no">
         <span class="ex-mark">✕</span><span class="ex-title">6-12 HC</span>
