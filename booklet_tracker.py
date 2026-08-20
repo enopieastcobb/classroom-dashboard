@@ -108,6 +108,12 @@ PARALLEL_LEVELS = (17, 18)
 # makes ten booklets and ten weeks the same span.
 DUPLICATE_LOOKBACK_WEEKS = 10
 
+# How much history a student needs before a level test or its packet is expected
+# of them -- the same reasoning as the English tracker. A child who joined
+# recently arrives mid-level, and the boundary they crossed to get there was
+# crossed somewhere else.
+HISTORY_REQUIRED_WEEKS = 6
+
 # The same booklet issued twice is an error -- except when it was meant. Three
 # words say it was, each marking a different situation for whoever reads the
 # assignment later:
@@ -146,6 +152,28 @@ REDO_RE = re.compile(r'\bredo\b\s*:?\s*(?P<list>[0-9,\s\-]+)', re.IGNORECASE)
 # keeps it as such: the level clears, and the reason is carried with it rather
 # than the score being quietly treated as a pass.
 ADVANCE_RE = re.compile(r'\badvance\b\s*:?\s*(?P<reason>.*)', re.IGNORECASE)
+
+
+def _has_enough_history(dated, today) -> bool:
+    """
+    Whether we have seen enough of this student to judge their level tests.
+
+    A level test is only missing if the child was here to be given one. Nathan W
+    joined a fortnight ago, arrived already on E-2, and was flagged for a level D
+    test that was never ours to set -- his level D work happened somewhere else.
+
+    So a test is looked for only once the record stretches back far enough for a
+    level boundary to plausibly have been crossed under our roof. Undated work,
+    or none at all, counts as not enough: silence is the safer answer when we
+    cannot tell.
+    """
+    if today is None:
+        return True
+    dates = [d for d in dated if d]
+    if not dates:
+        return False
+    cutoff = (today - timedelta(weeks=HISTORY_REQUIRED_WEEKS)).isoformat()
+    return min(dates) <= cutoff
 
 
 def parse_advance(*sources: str) -> Optional[str]:
@@ -364,6 +392,9 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
 
     findings = []
     findings.extend(_duplicates(booklets, level_tests, today))
+    enough_history = _has_enough_history(
+        [b['posted_key'] for b in booklets]
+        + [t['posted_key'] for t in level_tests], today)
 
     # A child young enough to be on the booklet curriculum with no booklet work
     # at all is a finding in itself, not a quiet pass. (Grade was resolved
@@ -390,7 +421,10 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
     # packet forgotten when a new level starts otherwise goes unnoticed for
     # weeks and then blocks the test.
     btm_seen = [b for b in booklets if b['series'] == 'BTM']
-    if btm_seen:
+    # Only for a student we have seen long enough. A recent joiner arrives
+    # mid-level, and the packet for the level they were already in was issued
+    # wherever they came from.
+    if btm_seen and enough_history:
         # Two tracks at once means two levels needing a packet, so each active
         # level is checked rather than just the one current position.
         if _running_parallel(btm_seen):
@@ -501,6 +535,13 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
             # run: eighteen booklets plus the packet are what the level test
             # examines. Critical thinking rolls into the next level on its own.
             if series == 'BTM' and book == BTM_FIRST and level > pos['level']:
+                if not enough_history:
+                    # The boundary cannot be judged, so say nothing about it --
+                    # neither demanding a test nor pushing the child into the
+                    # next level on a record that starts mid-way through this
+                    # one. Silence beats a confident guess in either direction.
+                    expected = []
+                    break
                 gate = _level_gate(level_tests, pos["level"], supplements)
                 if gate:
                     findings.append({'series': series, 'kind': gate['kind'],

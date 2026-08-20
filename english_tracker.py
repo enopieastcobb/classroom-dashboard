@@ -72,6 +72,11 @@ TEST_LOOKBACK_BOOKLETS = 10
 # the level-test check above.
 DUPLICATE_LOOKBACK_WEEKS = 10
 
+# How much history a student needs before a level test is expected of them. A
+# child who joined a fortnight ago arrives mid-level, and the test for the level
+# they finished elsewhere was never ours to set.
+HISTORY_REQUIRED_WEEKS = 6
+
 BOOKLET_TOPICS = ('classwork', 'homework')
 GRADED_TOPIC_RE = re.compile(r'graded', re.IGNORECASE)
 GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
@@ -322,6 +327,28 @@ def resolve_ambiguous_level(level: str, grade: Optional[int],
     direction to be wrong in.
     """
     return level not in ('6', '7', '8')
+
+
+def _has_enough_history(dated, today) -> bool:
+    """
+    Whether we have seen enough of this student to judge their level tests.
+
+    A level test is only missing if the child was here to be given one. Nathan W
+    joined a fortnight ago, arrived already on E-2, and was flagged for a level D
+    test that was never ours to set -- his level D work happened somewhere else.
+
+    So a test is looked for only once the record stretches back far enough for a
+    level boundary to plausibly have been crossed under our roof. Undated work,
+    or none at all, counts as not enough: silence is the safer answer when we
+    cannot tell.
+    """
+    if today is None:
+        return True
+    dates = [d for d in dated if d]
+    if not dates:
+        return False
+    cutoff = (today - timedelta(weeks=HISTORY_REQUIRED_WEEKS)).isoformat()
+    return min(dates) <= cutoff
 
 
 def _position(reading: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -597,9 +624,12 @@ def review_student(items: List[Dict[str, Any]], today=None,
 
     if reading:
         pos = _position(reading)
-        state = _test_state(reading, tests, pos)
-        if state:
-            findings.append(state)
+        dated = ([b['posted_key'] for b in reading]
+                 + [t['posted_key'] for t in tests])
+        if _has_enough_history(dated, today):
+            state = _test_state(reading, tests, pos)
+            if state:
+                findings.append(state)
 
         # The count comes first, as in maths: an open FIC is itself a booklet in
         # hand, so a child can be blocked and still hold the week's booklet.
