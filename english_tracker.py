@@ -126,7 +126,14 @@ LEGACY_TEST_RE = re.compile(
     rf'\b(?:ENG\s*)?LEVEL\s*(?P<level>{_LEVEL_ALT})\s*TEST\b', re.IGNORECASE)
 
 FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
-# A repeat of a booklet is normally an error; these two say it was intended.
+# A repeat of a booklet is normally an error. These three say it was intended,
+# and each marks a different situation for whoever reads the assignment later:
+#   REDO      -- failed the level test, work the booklet again
+#   REISSUE   -- the physical book was lost, replace it
+#   REASSIGN  -- not finished, another week to turn it in
+# The past-tense forms are accepted too, since that is how people write.
+DELIBERATE_REPEAT_RE = re.compile(
+    r'\b(?:REDO(?:NE)?|REISSUE[DS]?|REASSIGN(?:ED)?)\b', re.IGNORECASE)
 REDO_PREFIX_RE = re.compile(r'\bREDO\b', re.IGNORECASE)
 REISSUE_RE = re.compile(r'\bREISSUE\b', re.IGNORECASE)
 REDO_LIST_RE = re.compile(r'\bredo\b\s*:?\s*(?P<list>[A-I0-9,\s\-]+)', re.IGNORECASE)
@@ -356,8 +363,7 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
                 'open': i.get('status') == 'fic' and not i.get('turned_in'),
                 'outstanding': (i.get('status') in ('notdone', 'fic')
                                 and not i.get('turned_in')),
-                'exempt': bool(REDO_PREFIX_RE.search(title)
-                               or REISSUE_RE.search(title)),
+                'exempt': bool(DELIBERATE_REPEAT_RE.search(title)),
                 'posted_key': i.get('posted_key') or '',
             }
             # Undecidable only when unlabelled, at 6/7/8, and with no subject on

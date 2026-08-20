@@ -202,7 +202,7 @@
 
   <div class="synopsis">
     <p class="synopsis-line">
-      <span class="opt">[</span><span class="opt">REDO</span><span class="opt">|</span><span class="opt">REISSUE</span><span class="opt">]</span>
+      <span class="opt">[</span><span class="opt">REDO</span><span class="opt">|</span><span class="opt">REISSUE</span><span class="opt">|</span><span class="opt">REASSIGN</span><span class="opt">]</span>
       <span class="req">SERIES</span>
       <span class="req">level</span><span class="req">-</span><span class="req">booklet</span>
       <span class="opt">[HC]</span> <span class="opt">[FIC]</span>
@@ -265,6 +265,11 @@
           <tr>
             <td><code>REISSUE</code></td>
             <td>The physical book was lost and you are replacing it</td>
+            <td>Repeat allowed</td>
+          </tr>
+          <tr>
+            <td><code>REASSIGN</code></td>
+            <td>The child did not finish it — they get another week to turn it in</td>
             <td>Repeat allowed</td>
           </tr>
         </tbody>
@@ -335,6 +340,12 @@
       <div class="ex ex-yes">
         <span class="ex-mark">✓</span><span class="ex-title">REISSUE ENG F-12 HC</span>
         <span class="ex-why">Replacing a lost book</span>
+      </div>
+      <div class="ex ex-yes">
+        <span class="ex-mark">✓</span><span class="ex-title">REASSIGN ENG G-12 HC</span>
+        <span class="ex-why">Last week's booklet came back unfinished — another week to
+          turn it in. Without the prefix the dashboard reads this as the book having been
+          handed out twice.</span>
       </div>
     </div>
   </section>

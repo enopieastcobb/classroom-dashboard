@@ -108,11 +108,15 @@ PARALLEL_LEVELS = (17, 18)
 # makes ten booklets and ten weeks the same span.
 DUPLICATE_LOOKBACK_WEEKS = 10
 
-# The same booklet issued twice is an error -- except when it was meant. A redo
-# set is deliberately reassigned week after week, and a lost book has to be
-# replaced, so both say so in the title.
-REDO_PREFIX_RE = re.compile(r'\bREDO\b', re.IGNORECASE)
-REISSUE_RE = re.compile(r'\bREISSUE\b', re.IGNORECASE)
+# The same booklet issued twice is an error -- except when it was meant. Three
+# words say it was, each marking a different situation for whoever reads the
+# assignment later:
+#   REDO      -- failed the level test, work the booklet again
+#   REISSUE   -- the physical book was lost, replace it
+#   REASSIGN  -- not finished, another week to turn it in
+# The past-tense forms are accepted too, since that is how people write.
+DELIBERATE_REPEAT_RE = re.compile(
+    r'\b(?:REDO(?:NE)?|REISSUE[DS]?|REASSIGN(?:ED)?)\b', re.IGNORECASE)
 
 # Once a child is this far into a level's basic thinking run, the level's
 # supplementary packet should already have been issued. Catching it here means
@@ -331,8 +335,7 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
                 'outstanding': (i.get('status') in ('notdone', 'fic')
                                 and not i.get('turned_in')),
                 'posted_key': i.get('posted_key') or '',
-                'exempt': bool(REDO_PREFIX_RE.search(title)
-                               or REISSUE_RE.search(title)),
+                'exempt': bool(DELIBERATE_REPEAT_RE.search(title)),
             })
             continue
         t = LEVEL_TEST_RE.search(title)

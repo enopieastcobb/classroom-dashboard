@@ -46,6 +46,10 @@ results = [
           niyam + [graded('REDO BTM 11-8 HC', '2026-08-01')], []),
     check('REISSUE prefix exempts',
           niyam + [graded('REISSUE BTM 11-8 HC', '2026-08-01')], []),
+    check('REASSIGN prefix exempts (homework not finished)',
+          niyam + [graded('REASSIGN BTM 11-8 HC', '2026-08-01')], []),
+    check('past tense accepted too',
+          niyam + [graded('REASSIGNED BTM 11-8 HC', '2026-08-01')], []),
     # The ten-week bound is about the PAIR being stale, not the older copy.
     # A booklet in the child's hands today that they finished in January is
     # still a live mistake, so it flags.
