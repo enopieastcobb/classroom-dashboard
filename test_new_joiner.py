@@ -69,3 +69,29 @@ check('maths: long-standing at the same boundary -> packet flagged',
 
 print()
 print('all pass' if not fails else 'FAILURES:\n  ' + '\n  '.join(fails))
+
+
+# --- sections below grade 1 are named, not numbered ------------------------
+# "Gr K", "Pre-K" and "Weenopi" (the three- and four-year-olds) all read as an
+# unknown grade before this, which silently skipped the youngest children.
+from english_tracker import grade_number as eng_grade
+from booklet_tracker import grade_number as math_grade
+
+GRADES = {'Weenopi': -2, 'Weenopi [2026-2027]': -2, 'Pre-K': -1, 'Pre K': -1,
+          'PreK': -1, 'Gr K': 0, 'Grade K': 0, 'KG': 0, 'Kindergarten': 0,
+          'Gr 1[2026-2027]': 1, 'Gr 4 [2026-2027]': 4, 'Gr 7/8 [2026-2027]': 7}
+bad = [f'{s!r} -> english={eng_grade(s)} maths={math_grade(s)} want {want}'
+       for s, want in GRADES.items()
+       if eng_grade(s) != want or math_grade(s) != want]
+print()
+print(f'{len(GRADES)} section forms')
+print('all pass' if not bad else 'FAIL:\n  ' + '\n  '.join(bad))
+
+# The writing check must reach every section below grade 1, not just Gr 1.
+def _no_writing(section):
+    r = review_english([eng('ENG A-4 hc', '2026-08-13')], T, section)
+    return any('essay writing' in n for n in r['notes'])
+
+wrong = [s for s in ('Weenopi', 'Pre-K', 'Gr K', 'Gr 1') if not _no_writing(s)]
+wrong += [s for s in ('Gr 2', 'Gr 3', 'Gr 4') if _no_writing(s)]
+print('writing-grade coverage: ' + ('all pass' if not wrong else f'FAIL {wrong}'))

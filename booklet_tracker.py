@@ -217,10 +217,37 @@ def parse_redo_list(*sources: str) -> List[Dict[str, int]]:
     return []
 GRADE_RE = re.compile(r'\bGr(?:ade)?\s*(?P<grade>\d{1,2})', re.IGNORECASE)
 
+# Sections below grade 1 are named, not numbered: "Gr K", "Pre-K", and
+# "Weenopi" for the three- and four-year-olds. GRADE_RE only reads digits, so
+# every one of them came back as an unknown grade -- which silently skipped the
+# youngest children, the ones the checks matter most for.
+#
+# Mapped to integers below 1 so every existing comparison keeps working.
+GRADE_K, GRADE_PREK, GRADE_WEENOPI = 0, -1, -2
+WEENOPI_RE = re.compile(r'\bwee\s*-?\s*nopi\b', re.IGNORECASE)
+PREK_RE = re.compile(r'\bpre\s*-?\s*k\b', re.IGNORECASE)
+# Deliberately narrow: a bare "K" appears in too many other places, so this
+# wants "Gr K", "Grade K", "KG" or "Kindergarten".
+K_RE = re.compile(r'\bGr(?:ade)?\s*K\b|\bKG\b|\bkinder\w*', re.IGNORECASE)
+
+
 
 def grade_number(section: str) -> Optional[int]:
-    """The grade from a class section like "Gr 3 [2026-2027]"."""
-    m = GRADE_RE.search(section or '')
+    """
+    The grade from a class section, or None when it cannot be read.
+
+    Handles the named sections below grade 1 as well as "Gr 4 [2026-2027]".
+    Weenopi is checked before Pre-K, and Pre-K before K, since each contains
+    the next one's letter.
+    """
+    section = section or ''
+    if WEENOPI_RE.search(section):
+        return GRADE_WEENOPI
+    if PREK_RE.search(section):
+        return GRADE_PREK
+    if K_RE.search(section):
+        return GRADE_K
+    m = GRADE_RE.search(section)
     return int(m.group('grade')) if m else None
 
 
