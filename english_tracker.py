@@ -42,6 +42,17 @@ READING_PER_WEEK = 1
 WRITING_LEVELS: Tuple[str, ...] = tuple('ABCDEFGHIJKLM')
 WRITING_MAX_GRADE = 1
 
+# Levels A to E hold ONE writing booklet, which covers all thirty reading
+# booklets of that level -- so once it exists, finished or not, that level is
+# satisfied. From F there are four, worked one after another over six to eight
+# weeks each, so a finished one has a successor.
+#
+# The reading and writing levels drift apart: a grade-1 child can be on reading
+# level D and writing level F at the same time, since by first grade they are
+# moved to E or F whatever their reading level.
+WRITING_SINGLE_BOOK_LEVELS = frozenset('ABCDE')
+WRITING_BOOKS_PER_LEVEL = 4
+
 # Reading booklets are checked to grade 4. Above that nothing is demanded, but
 # booklet activity is still reported -- a child past the curriculum who is
 # somehow still on booklets is worth surfacing. That is the REVERSE of maths,
@@ -436,7 +447,11 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
 
         w = parse_writing(title)
         if w:
-            writing.append({**w, 'title': title})
+            writing.append({
+                **w, 'title': title,
+                'outstanding': (i.get('status') in ('notdone', 'fic')
+                                and not i.get('turned_in')),
+            })
             continue
 
         for b in parse_reading_all(title):
@@ -617,7 +632,8 @@ def _writing_state(reading, writing, grade) -> Optional[Dict[str, Any]]:
     # reading D with writing F-1, which the general rule alone would flag.
     if grade == 1:
         allowed |= {'E', 'F'}
-    if not any(w['level'] in allowed for w in writing):
+    here = [w for w in writing if w['level'] in allowed]
+    if not here:
         best = max(writing, key=lambda w: WRITING_LEVELS.index(w['level']))
         return {'series': 'EW', 'kind': 'writing_level', 'expected': [],
                 'severe': False,
@@ -625,6 +641,19 @@ def _writing_state(reading, writing, grade) -> Optional[Dict[str, Any]]:
                           f"{best['book']}, expected "
                           f"{' or '.join(sorted(allowed))} for reading level "
                           f"{pos['level']}"}
+
+    # From level F the four booklets are worked in turn, so one finished with
+    # nothing in hand means the next is due. Below F there is only ever one
+    # booklet for the level, and finishing it is not a reason to expect another.
+    current = max(here, key=lambda w: (WRITING_LEVELS.index(w['level']), w['book']))
+    if (current['level'] not in WRITING_SINGLE_BOOK_LEVELS
+            and current['book'] < WRITING_BOOKS_PER_LEVEL
+            and not any(w['outstanding'] for w in here)):
+        return {'series': 'EW', 'kind': 'writing_next', 'expected': [],
+                'severe': False,
+                'detail': f"essay writing {current['level']}"
+                          f"{current['book'] + 1} not given yet "
+                          f"({current['level']}{current['book']} is finished)"}
     return None
 
 

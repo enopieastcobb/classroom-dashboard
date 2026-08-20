@@ -102,3 +102,38 @@ def _no_writing(section):
 wrong = [s for s in ('Weenopi', 'Pre-K', 'Gr K', 'Gr 1') if not _no_writing(s)]
 wrong += [s for s in ('Gr 2', 'Gr 3', 'Gr 4') if _no_writing(s)]
 print('writing-grade coverage: ' + ('all pass' if not wrong else f'FAIL {wrong}'))
+
+
+# --- writing booklets: one per level below F, four from F ------------------
+# A grade-1 child can be on reading level D and writing level F at once, and F
+# holds four booklets worked in turn. Below F there is one booklet covering all
+# thirty reading booklets of the level, so finishing it is not a reason to
+# expect another -- which is what would have flagged every Pre-K child the
+# moment they handed their writing booklet in.
+def w_note(items, section):
+    r = review_english(items, T, section)
+    return [x for x in r['notes'] if 'writing' in x]
+
+
+def eng_done(t, p='2026-05-01'):
+    return {'title': t, 'topic': 'Graded Assignments', 'subject': 'English',
+            'subject_stated': False, 'status': 'done', 'turned_in': True,
+            'score_percent': 90, 'posted_key': p}
+
+
+G1 = 'Gr 1[2026-2027]'
+check('writing: F1 in hand -> nothing due',
+      w_note([eng('ENG D-13 hc', '2026-05-01'), eng('Essay Writing F1', '2026-05-01')], G1), [])
+check('writing: F1 finished -> F2 due',
+      w_note([eng('ENG D-13 hc', '2026-05-01'), eng_done('Essay Writing F1')], G1),
+      ['essay writing F2 not given yet (F1 is finished)'])
+check('writing: F4 finished -> nothing further',
+      w_note([eng('ENG D-13 hc', '2026-05-01'), eng_done('Essay Writing F4')], G1), [])
+check('writing: Pre-K B1 finished -> covers the level',
+      w_note([eng('ENG B-20 hc', '2026-05-01'), eng_done('Essay Writing B1')],
+             'Pre-K [2026-2027]'), [])
+check('writing: Weenopi with no writing booklet at all',
+      w_note([eng('ENG A-4 hc', '2026-05-01')], 'Weenopi [2026-2027]'),
+      ['no essay writing booklet assigned'])
+print()
+print('all pass' if not fails else 'FAILURES:\n  ' + '\n  '.join(fails))
