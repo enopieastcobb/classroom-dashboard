@@ -20,10 +20,10 @@ def check(name, got, want):
         fails.append(f'{name}: got {got} want {want}')
 
 
-def eng(t, posted, topic='Homework'):
+def eng(t, posted, topic='Homework', due='2026-08-27'):
     return {'title': t, 'topic': topic, 'subject': 'English',
             'subject_stated': True, 'status': 'notdone', 'turned_in': False,
-            'score_percent': None, 'posted_key': posted}
+            'score_percent': None, 'posted_key': posted, 'due_key': due}
 
 
 def eng_done(t, p):
@@ -115,10 +115,10 @@ def w_note(items, section):
     return [x for x in r['notes'] if 'writing' in x]
 
 
-def eng_done(t, p='2026-05-01'):
+def eng_done(t, p='2026-05-01', due='2026-06-01'):
     return {'title': t, 'topic': 'Graded Assignments', 'subject': 'English',
             'subject_stated': False, 'status': 'done', 'turned_in': True,
-            'score_percent': 90, 'posted_key': p}
+            'score_percent': 90, 'posted_key': p, 'due_key': due}
 
 
 G1 = 'Gr 1[2026-2027]'
@@ -127,6 +127,14 @@ check('writing: F1 in hand -> nothing due',
 check('writing: F1 finished -> F2 due',
       w_note([eng('ENG D-13 hc', '2026-05-01'), eng_done('Essay Writing F1')], G1),
       ['essay writing F2 not given yet (F1 is finished)'])
+# The due date is the six-to-eight-week window written down: F1 went out this
+# month due the first week of September, so finishing it in August owes nothing.
+check('writing: F1 finished but due date not yet reached',
+      w_note([eng('ENG D-13 hc', '2026-05-01'),
+              eng_done('Essay Writing F1', due='2026-09-01')], G1), [])
+check('writing: F1 finished, no due date recorded -> silent',
+      w_note([eng('ENG D-13 hc', '2026-05-01'),
+              eng_done('Essay Writing F1', due='9999-12-31')], G1), [])
 check('writing: F4 finished -> nothing further',
       w_note([eng('ENG D-13 hc', '2026-05-01'), eng_done('Essay Writing F4')], G1), [])
 check('writing: Pre-K B1 finished -> covers the level',

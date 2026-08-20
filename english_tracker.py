@@ -451,6 +451,10 @@ def _collect(items: List[Dict[str, Any]], grade: Optional[int]):
                 **w, 'title': title,
                 'outstanding': (i.get('status') in ('notdone', 'fic')
                                 and not i.get('turned_in')),
+                # '9999-12-31' when Classroom holds no due date, which is a
+                # useful sentinel: a booklet with no date is never past it, so
+                # its successor is never demanded.
+                'due_key': i.get('due_key') or '9999-12-31',
             })
             continue
 
@@ -604,7 +608,7 @@ def _test_state(reading, tests, pos) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _writing_state(reading, writing, grade) -> Optional[Dict[str, Any]]:
+def _writing_state(reading, writing, grade, today=None) -> Optional[Dict[str, Any]]:
     """
     Whether a writing booklet is in hand, for the children who get them.
 
@@ -642,13 +646,20 @@ def _writing_state(reading, writing, grade) -> Optional[Dict[str, Any]]:
                           f"{' or '.join(sorted(allowed))} for reading level "
                           f"{pos['level']}"}
 
-    # From level F the four booklets are worked in turn, so one finished with
-    # nothing in hand means the next is due. Below F there is only ever one
-    # booklet for the level, and finishing it is not a reason to expect another.
+    # From level F the four booklets are worked in turn, so the next one falls
+    # due once the current one is finished AND ITS DUE DATE HAS PASSED. The due
+    # date is the six-to-eight-week window written down: F1 went to every first
+    # grader this month with a due date in the first week of September, so a
+    # child who finishes it in August is not owed F2 yet.
+    #
+    # Below F there is only ever one booklet for the level, and finishing it is
+    # not a reason to expect another.
     current = max(here, key=lambda w: (WRITING_LEVELS.index(w['level']), w['book']))
     if (current['level'] not in WRITING_SINGLE_BOOK_LEVELS
             and current['book'] < WRITING_BOOKS_PER_LEVEL
-            and not any(w['outstanding'] for w in here)):
+            and not any(w['outstanding'] for w in here)
+            and today is not None
+            and current['due_key'] < today.isoformat()):
         return {'series': 'EW', 'kind': 'writing_next', 'expected': [],
                 'severe': False,
                 'detail': f"essay writing {current['level']}"
@@ -726,7 +737,7 @@ def review_student(items: List[Dict[str, Any]], today=None,
                          'severe': False,
                          'detail': f"grade {grade} but no English booklet work found"})
 
-    w = _writing_state(reading, writing, grade)
+    w = _writing_state(reading, writing, grade, today)
     if w:
         findings.append(w)
 
