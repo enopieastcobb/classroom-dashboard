@@ -1,0 +1,23 @@
+# What NOT to upload to Cloud Build.
+#
+# Without this, every build tarred 12,325 files and 378 MB -- almost all of it
+# the tracked venv/ -- and shipped them into the image. The app's own source is
+# about twenty files. Nothing excluded here is needed to build: the image
+# installs its dependencies from requirements.txt.
+#
+# NOTE: when this file exists, gcloud uses it INSTEAD of .gitignore, so anything
+# the build actually needs must not be listed below.
+
+.git/
+.gitignore
+
+# A Linux virtualenv committed by accident. The image pip-installs instead.
+venv/
+
+# Compiled bytecode. A stale main.cpython-312.pyc matching the container's
+# Python version was a real hazard here -- it had been compiled from a main.py
+# of a completely different vintage.
+__pycache__/
+*.py[cod]
+
+.DS_Store

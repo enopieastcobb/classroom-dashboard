@@ -1,0 +1,10 @@
+# venv/ and some five thousand .pyc files are already tracked from before this
+# file existed. This stops any MORE arriving; untracking what is already in
+# there is a separate, deliberate change.
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Local environment files -- never committed.
+*.local
