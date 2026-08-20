@@ -90,11 +90,26 @@ READING_RE = re.compile(
     rf'\bENG\s*(?P<level>{_LEVEL_ALT})\s*-+\s*(?P<book>\d{{1,2}})(?!\d)(?!-\d)',
     re.IGNORECASE)
 
-# "ESSAYWriting: F-1 HC". A title under this prefix with no level is prompt work
-# for grade 2+, not a booklet, and simply does not match.
-WRITING_RE = re.compile(
-    rf'\bESSAY\s*WRITING\s*:?\s*(?P<level>{_WLEVEL_ALT})\s*-+\s*'
-    rf'(?P<book>\d{{1,2}})(?![\d-])', re.IGNORECASE)
+# Writing booklets are recognised in two steps, because the titles vary far more
+# than the reading ones do:
+#
+#   "Essay Writing: F-1 HC"                 "F1 Essay Writing Aug Sept - 2026"
+#   "ESSAY WRITING F1 AUG SEPT F1 - 2026"   "ESSAY WRITING AUG SEPT F1 - 2026"
+#
+# First the phrase has to be there at all. Then the level+booklet token is looked
+# for ANYWHERE in the title -- it turns up before the phrase, straight after it,
+# or at the end, and demanding a fixed position missed most of them.
+ESSAY_PHRASE_RE = re.compile(r'\bessay\s*writing\b', re.IGNORECASE)
+
+# The hyphen is OPTIONAL: teachers write "F1" at least as often as "F-1".
+#
+# The (?!\d) guard is what keeps this safe. Without it "Essay Writing D 2026"
+# reads as level D booklet 20, since a two-digit book would happily eat "20".
+# Requiring nothing else numeric to follow rules that out, while "F1", "F-1" and
+# "F - 1" all still match.
+WRITING_TOKEN_RE = re.compile(
+    rf'\b(?P<level>{_WLEVEL_ALT})\s*-?\s*(?P<book>\d{{1,2}})(?!\d)',
+    re.IGNORECASE)
 
 # Legacy reading: "F28 HC", "H-5 HC", "G28-HC", "G 24 HC", "G - 24HC".
 #
@@ -112,12 +127,7 @@ LEGACY_READING_RE = re.compile(
     rf'(?!.*\bessay\s*writing\b)'
     rf'(?=.*(?<![A-Za-z])HC\b)', re.IGNORECASE)
 
-# Legacy writing: "F1 Essay Writing Aug Sept - 2026". These carry NO HC, so they
-# are recognised by the phrase instead. "Essay Writing Aug-Sept 2026" has no
-# leading level and so is correctly not a booklet.
-LEGACY_WRITING_RE = re.compile(
-    rf'^\s*(?P<level>{_WLEVEL_ALT})\s*-?\s*(?P<book>\d{{1,2}})(?!\d)(?!-\d)'
-    rf'(?=.*\bessay\s*writing\b)', re.IGNORECASE)
+
 
 # "TEST: ENG Level I" going forward; "ENG Level F Test", "Level G Test" behind us.
 TEST_RE = re.compile(
@@ -233,13 +243,21 @@ def parse_reading_all(title: str) -> List[Dict[str, Any]]:
 
 
 def parse_writing(title: str) -> Optional[Dict[str, Any]]:
-    """A writing booklet, or None. Prompt work carries no level and so is None."""
+    """
+    A writing booklet, or None.
+
+    The phrase must be present AND a level+booklet token found somewhere in the
+    title. Prompt work for grade 2 and above -- "Essay Writing Aug-Sept 2026" --
+    carries the phrase but no level, so it correctly comes back None.
+    """
     title = title or ''
-    m = WRITING_RE.search(title) or LEGACY_WRITING_RE.search(title)
+    if not ESSAY_PHRASE_RE.search(title):
+        return None
+    m = WRITING_TOKEN_RE.search(title)
     if not m:
         return None
     return {'series': 'EW', 'level': m.group('level').upper(),
-            'book': int(m.group('book')), 'labelled': bool(WRITING_RE.search(title))}
+            'book': int(m.group('book')), 'labelled': True}
 
 
 def parse_level_test(title: str) -> Optional[str]:

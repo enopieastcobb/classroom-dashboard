@@ -65,3 +65,38 @@ for got, want in ((next_reading_booklet('F', 29), ('F', 30)),
 
 print(f'{len(READING)+len(WRITING)+len(TESTS)+len(NEITHER)+6} cases')
 print('FAIL:\n  ' + '\n  '.join(fails) if fails else 'all pass')
+
+
+# --- writing booklets, as teachers actually title them --------------------
+# The original pattern demanded "F-1" immediately after the phrase. Real titles
+# put the token before the phrase, after it, or at the end, and write "F1" at
+# least as often as "F-1" -- so Nathan W's ESSAY WRITING F1 ... was reported as
+# having no writing booklet at all while it sat on his card.
+WRITING_REAL = {
+    'ESSAY WRITING F1 AUG SEPT F1 - 2026': ('F', 1),
+    'ESSAY WRITING AUG SEPT F1 - 2026': ('F', 1),
+    'F1 Essay Writing Aug Sept - 2026': ('F', 1),
+    'Essay Writing: F-1 HC': ('F', 1),
+    'ESSAYWriting: F-1 HC': ('F', 1),
+    'Essay Writing F - 1 HC': ('F', 1),
+    'ESSAY WRITING E2 2026': ('E', 2),
+    'Essay Writing: C-1': ('C', 1),
+}
+# Prompt work for grade 2+: carries the phrase, names no level.
+WRITING_NONE = ['Essay Writing Aug-Sept 2026', 'ESSAY WRITING AUG SEPT 2026',
+                'Essay Writing D 2026', 'Essay Writing Jan 2026',
+                'Essay Writing 2026', 'Essay Writing Gr1 part 2']
+
+more = []
+for t, want in WRITING_REAL.items():
+    w = parse_writing(t)
+    if not w or (w['level'], w['book']) != want:
+        more.append(f'writing wrong: {t!r} -> {w}')
+    if parse_reading(t):
+        more.append(f'writing ALSO read as reading: {t!r}')
+for t in WRITING_NONE:
+    if parse_writing(t):
+        more.append(f'prompt work read as a booklet: {t!r}')
+
+print(f'{len(WRITING_REAL) + len(WRITING_NONE)} writing-title cases')
+print('FAIL:\n  ' + '\n  '.join(more) if more else 'all pass')
