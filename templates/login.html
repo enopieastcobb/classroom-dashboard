@@ -3,21 +3,38 @@
 <div class="center-page">
     <div class="card" style="max-width:380px; width:100%; text-align:center;">
         <h1 style="font-size:18px; margin:0 0 4px;">Classroom Progress Insights</h1>
+        {% if signed_out %}
+        <p style="font-size:13px; color:#8a2020; margin:0 0 20px;">
+            Your sign-in has timed out. Sign in again and you will come straight back
+            to{% if sel_day %} {{ sel_day }}{% endif %}{% if sel_time %}, {{ sel_time }}{% endif %}{% if sel_subject %}, {{ sel_subject }}{% endif %}.
+        </p>
+        {% else %}
         <p style="font-size:13px; color:#6b7280; margin:0 0 20px;">
             Sign in with your Google Workspace account to view your class dashboard.
         </p>
+        {% endif %}
 
+        <!-- auto_select lets Google reissue silently, with no click, when the
+             teacher still has exactly one account signed in -- the usual case
+             here, since it is the same three staff accounts all day. -->
         <div id="g_id_onload"
              data-client_id="{{ google_client_id }}"
+             data-auto_select="true"
              data-callback="handleCredentialResponse">
         </div>
         <div class="g_id_signin" data-type="standard" data-shape="pill" data-theme="outline" data-size="large"
              style="display:flex; justify-content:center;"></div>
 
+        <!-- The session being viewed rides along, so signing back in returns the
+             teacher to that day, room and hour rather than the default one. -->
         <form id="loginForm" method="POST" action="/dashboard" style="display:none;">
             <input type="hidden" name="credential" id="credentialInput">
             <input type="hidden" name="courseId" value="{{ courseId or '' }}">
             <input type="hidden" name="addOnToken" value="{{ addOnToken or '' }}">
+            <input type="hidden" name="day" value="{{ sel_day or '' }}">
+            <input type="hidden" name="subject" value="{{ sel_subject or '' }}">
+            <input type="hidden" name="time" value="{{ sel_time or '' }}">
+            <input type="hidden" name="walkins" value="{{ walkins_raw or '' }}">
         </form>
     </div>
 </div>

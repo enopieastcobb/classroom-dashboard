@@ -1141,10 +1141,31 @@ async def classroom_dashboard(request: Request):
         timings[label] = round(time.perf_counter() - since, 2)
         return time.perf_counter()
 
+    # Sign-in is checked on its own, ahead of everything else, because a lapsed
+    # one is not a fault -- it is a Google ID token reaching the end of its
+    # hour. Folded into the general handler it produced "Could not load this
+    # session right now", which reads like a breakage and tells a teacher
+    # nothing about what to do. Instead they go back to the sign-in prompt with
+    # the session they were looking at carried along, so one click -- often
+    # none, since One Tap can reissue silently -- returns them to that screen.
     try:
         t = time.perf_counter()
         teacher_email = _verify_and_get_email(id_token)
         t = _mark('verify_token', t)
+    except Exception as auth_err:
+        logger.info("Sign-in lapsed, returning to the prompt: %s", auth_err)
+        return templates.TemplateResponse(request, "login.html", {
+            "google_client_id": GOOGLE_CLIENT_ID,
+            "courseId": form_data.get("courseId") or "",
+            "addOnToken": form_data.get("addOnToken") or "",
+            "sel_day": sel_day,
+            "sel_subject": sel_subject,
+            "sel_time": sel_time,
+            "walkins_raw": form_data.get("walkins") or "",
+            "signed_out": True,
+        })
+
+    try:
 
         # Default to today when it's a session day, else the first one.
         if sel_day not in ScheduleService.DAYS:
