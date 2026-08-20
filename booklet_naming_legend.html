@@ -252,25 +252,27 @@
   <section>
     <h2>Modifiers — in front of the series</h2>
     <p class="note">A booklet appearing twice is normally a mistake, and the dashboard flags it.
-      These two prefixes say the repeat was deliberate, so it passes quietly.</p>
+      <code>REDO</code> and <code>REISSUE</code> say a second book genuinely was handed over,
+      so those pass quietly. <code>REASSIGN</code> is different: it goes on the row that
+      already exists, so there should never be two.</p>
     <div class="scroll">
       <table>
-        <thead><tr><th>Prefix</th><th>Use it when</th><th>Effect</th></tr></thead>
+        <thead><tr><th>Prefix</th><th>Use it when</th><th>What you do in Classroom</th></tr></thead>
         <tbody>
           <tr>
             <td><code>REDO</code></td>
             <td>The child is redoing the booklet after a failed level test</td>
-            <td>Repeat allowed</td>
+            <td><b>New assignment</b>, one a week until the redo set is cleared</td>
           </tr>
           <tr>
             <td><code>REISSUE</code></td>
-            <td>The physical book was lost and you are replacing it</td>
-            <td>Repeat allowed</td>
+            <td>The physical book was lost, so you hand over a fresh copy</td>
+            <td><b>New assignment</b> — a second book really was given, so both rows stay</td>
           </tr>
           <tr>
             <td><code>REASSIGN</code></td>
-            <td>The child did not finish it — they get another week to turn it in</td>
-            <td>Repeat allowed</td>
+            <td>The child did not finish it and gets another week to turn it in</td>
+            <td><b>Edit the existing row</b> — no new book, so no new assignment</td>
           </tr>
         </tbody>
       </table>
@@ -344,8 +346,8 @@
       <div class="ex ex-yes">
         <span class="ex-mark">✓</span><span class="ex-title">REASSIGN ENG G-12 HC</span>
         <span class="ex-why">Last week's booklet came back unfinished — another week to
-          turn it in. Without the prefix the dashboard reads this as the book having been
-          handed out twice.</span>
+          turn it in. Add the prefix to the row that is already there; do not create a
+          second one, because no second book was handed over.</span>
       </div>
     </div>
   </section>

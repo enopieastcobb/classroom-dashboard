@@ -128,12 +128,17 @@ LEGACY_TEST_RE = re.compile(
 FIC_RE = re.compile(r'\bfic\b', re.IGNORECASE)
 # A repeat of a booklet is normally an error. These three say it was intended,
 # and each marks a different situation for whoever reads the assignment later:
-#   REDO      -- failed the level test, work the booklet again
-#   REISSUE   -- the physical book was lost, replace it
-#   REASSIGN  -- not finished, another week to turn it in
-# The past-tense forms are accepted too, since that is how people write.
+#   REDO     -- failed the level test; the set is reassigned one a week
+#   REISSUE   -- the physical book was lost, so a SECOND book was handed over
+# Both genuinely produce two records, so both have to be forgiven.
+#
+# REASSIGN is deliberately NOT here. A booklet that came back unfinished gets
+# another week by editing the row that already exists -- no new book, no new
+# record. So a REASSIGN title appearing twice is a real mistake, and exempting
+# it would hide exactly what the check is for.
+# Past-tense forms are accepted, since that is how people write.
 DELIBERATE_REPEAT_RE = re.compile(
-    r'\b(?:REDO(?:NE)?|REISSUE[DS]?|REASSIGN(?:ED)?)\b', re.IGNORECASE)
+    r'\b(?:REDO(?:NE)?|REISSUE[DS]?)\b', re.IGNORECASE)
 REDO_PREFIX_RE = re.compile(r'\bREDO\b', re.IGNORECASE)
 REISSUE_RE = re.compile(r'\bREISSUE\b', re.IGNORECASE)
 REDO_LIST_RE = re.compile(r'\bredo\b\s*:?\s*(?P<list>[A-I0-9,\s\-]+)', re.IGNORECASE)
@@ -580,7 +585,9 @@ def review_student(items: List[Dict[str, Any]], today=None,
 
         # The count comes first, as in maths: an open FIC is itself a booklet in
         # hand, so a child can be blocked and still hold the week's booklet.
-        holding = [b for b in reading if b['outstanding']]
+        # Counted by booklet, not by record -- see the maths tracker. A reissued
+        # book has two rows and must still count once.
+        holding = {(b['level'], b['book']) for b in reading if b['outstanding']}
         if len(holding) < READING_PER_WEEK:
             open_fics = [b for b in reading if b['is_fic'] and b['open']]
             redo = [(l, b) for t in tests for l, b in t['redo']

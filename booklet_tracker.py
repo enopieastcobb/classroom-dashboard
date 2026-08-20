@@ -111,12 +111,17 @@ DUPLICATE_LOOKBACK_WEEKS = 10
 # The same booklet issued twice is an error -- except when it was meant. Three
 # words say it was, each marking a different situation for whoever reads the
 # assignment later:
-#   REDO      -- failed the level test, work the booklet again
-#   REISSUE   -- the physical book was lost, replace it
-#   REASSIGN  -- not finished, another week to turn it in
-# The past-tense forms are accepted too, since that is how people write.
+#   REDO     -- failed the level test; the set is reassigned one a week
+#   REISSUE   -- the physical book was lost, so a SECOND book was handed over
+# Both genuinely produce two records, so both have to be forgiven.
+#
+# REASSIGN is deliberately NOT here. A booklet that came back unfinished gets
+# another week by editing the row that already exists -- no new book, no new
+# record. So a REASSIGN title appearing twice is a real mistake, and exempting
+# it would hide exactly what the check is for.
+# Past-tense forms are accepted, since that is how people write.
 DELIBERATE_REPEAT_RE = re.compile(
-    r'\b(?:REDO(?:NE)?|REISSUE[DS]?|REASSIGN(?:ED)?)\b', re.IGNORECASE)
+    r'\b(?:REDO(?:NE)?|REISSUE[DS]?)\b', re.IGNORECASE)
 
 # Once a child is this far into a level's basic thinking run, the level's
 # supplementary packet should already have been issued. Catching it here means
@@ -418,7 +423,11 @@ def review_student(items: List[Dict[str, Any]], today: Optional[date] = None,
         # the full week. Nirman had 20-10 FIC and 20-11 -- two BTM, the week
         # satisfied -- and reporting a hold there said nothing a teacher could
         # act on. Nothing owed, nothing to say.
-        holding = [b for b in in_series if b['outstanding']]
+        # Counted by BOOKLET, not by record. A reissued book has two rows -- the
+        # lost original and its replacement -- and if the original was never
+        # turned in both are outstanding. Counting rows would credit the child
+        # with two booklets for one book and quietly skip a real handover.
+        holding = {(b['level'], b['book']) for b in in_series if b['outstanding']}
         shortfall = per_week - len(holding)
         if shortfall <= 0:
             continue
