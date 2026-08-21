@@ -65,6 +65,10 @@
   .att-missing { font-size:14px; color:#7a3a12; background:#fdf1e3;
                  border:1px solid #f0d3ae; border-radius:8px;
                  padding:9px 12px; margin:0 0 12px; }
+  /* What a help-session child is working on, for whoever is supervising. */
+  .att-sub { display:block; font-size:12px; font-weight:500; color:#6b7280;
+             margin-top:2px; }
+  .att-tile[aria-pressed="true"] .att-sub { color:#3f6b53; }
   .att-link { background:none; border:none; padding:0; color:#2563eb;
               cursor:pointer; text-decoration:underline; font-size:14px;
               font-family:inherit; }
@@ -119,7 +123,7 @@
                 data-student="{{ s.name }}" data-time="{{ h.time }}"
                 data-subject="{{ r.room }}" data-teacher="{{ g.teacher }}">
           <span class="mark" aria-hidden="true">✓</span>
-          <span>{{ s.name }}</span>
+          <span>{{ s.name }}{% if s.note %}<span class="att-sub">{{ s.note }}</span>{% endif %}</span>
         </button>
         {% endfor %}
       </div>

@@ -1053,6 +1053,11 @@ MAKEUP_GROUP = "Make-ups"
 # extra support.
 HELP_GROUP = "Help session"
 HELP_NOTE_RE = re.compile(r'\bhelp\b', re.IGNORECASE)
+# Said plainly on the register, because it tells the admin where to walk. The
+# exception -- a class teacher with two or fewer students that hour keeps the
+# child with them instead -- is left to the person doing the walking rather
+# than guessed at from a roster count here.
+HELP_ROOM_LABEL = "Help session · separate room"
 
 
 def simulated_now(raw: str) -> Optional[datetime]:
@@ -1152,11 +1157,17 @@ def _attendance_context(request: Request, form, teacher_email: str):
         name = (mu.get("student_name") or "").strip()
         if not name:
             continue
+        is_help = bool(HELP_NOTE_RE.search(mu.get("notes") or ''))
+        # A make-up child sits in the ordinary class, so they belong to that
+        # room. A HELP child usually does not: they are put in a separate room
+        # with a grader or front-desk staff overseeing them, so filing them
+        # under Maths would send the admin looking in a room they are not in.
+        # Their subject follows them as a note instead, since whoever is
+        # supervising still needs to know what the child is working on.
         entries.append({"time": mu.get("time") or '',
-                        "subject": mu.get("subject") or '',
-                        "teacher": (HELP_GROUP
-                                    if HELP_NOTE_RE.search(mu.get("notes") or '')
-                                    else MAKEUP_GROUP),
+                        "subject": HELP_GROUP if is_help else (mu.get("subject") or ''),
+                        "teacher": '' if is_help else MAKEUP_GROUP,
+                        "note": (mu.get("subject") or '') if is_help else '',
                         "student_name": name})
 
     try:
@@ -1176,11 +1187,15 @@ def _attendance_context(request: Request, form, teacher_email: str):
         room = e.get("subject") or ""
         (by_hour.setdefault(e.get("time") or "", {})
                .setdefault(room, {})
-               .setdefault(e.get("teacher") or "", [])).append(name)
+               .setdefault(e.get("teacher") or "", [])).append(
+                   (name, e.get("note") or ''))
 
     for hour in sorted(by_hour, key=_time_key):
         rooms = []
-        for room in sorted(by_hour[hour]):
+        # Subject rooms first, the help room last -- it is the odd one out on
+        # the walk, and putting it after Maths and English matches the order
+        # the rooms actually get visited in.
+        for room in sorted(by_hour[hour], key=lambda r: (r == HELP_GROUP, r)):
             groups = []
             # The room's own teacher first, then the children who are here for
             # another reason. Plain alphabetical order put "Help session" above
@@ -1191,8 +1206,9 @@ def _attendance_context(request: Request, form, teacher_email: str):
             for teacher, names in sorted(by_hour[hour][room].items(),
                                          key=lambda kv: _group_order(kv[0])):
                 students = [{"name": n, "slug": attendance.slug(n),
+                             "note": note,
                              "present": attendance.slug(n) in ctx["present"]}
-                            for n in sorted(set(names))]
+                            for n, note in sorted(set(names))]
                 groups.append({"teacher": teacher, "students": students})
                 ctx["expected"] += len(students)
                 ctx["marked"] += sum(1 for s in students if s["present"])
@@ -1200,7 +1216,9 @@ def _attendance_context(request: Request, form, teacher_email: str):
             # unlabelled block, which reads as a glitch rather than as missing
             # information in the Sheet.
             rooms.append({"room": room,
-                          "label": ROOM_LABEL.get(room) or room or "Room not recorded",
+                          "label": (HELP_ROOM_LABEL if room == HELP_GROUP
+                                    else ROOM_LABEL.get(room) or room
+                                    or "Room not recorded"),
                           "groups": groups})
         by_room_total = sum(len(g["students"]) for r in rooms for g in r["groups"])
         by_room_marked = sum(1 for r in rooms for g in r["groups"]
