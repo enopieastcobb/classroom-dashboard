@@ -1182,14 +1182,25 @@ def _attendance_context(request: Request, form, teacher_email: str):
         rooms = []
         for room in sorted(by_hour[hour]):
             groups = []
-            for teacher, names in sorted(by_hour[hour][room].items()):
+            # The room's own teacher first, then the children who are here for
+            # another reason. Plain alphabetical order put "Help session" above
+            # the teacher whose class it is, which reads as though the room
+            # belonged to it.
+            def _group_order(t):
+                return ({HELP_GROUP: 1, MAKEUP_GROUP: 2, WALKIN_GROUP: 3}.get(t, 0), t)
+            for teacher, names in sorted(by_hour[hour][room].items(),
+                                         key=lambda kv: _group_order(kv[0])):
                 students = [{"name": n, "slug": attendance.slug(n),
                              "present": attendance.slug(n) in ctx["present"]}
                             for n in sorted(set(names))]
                 groups.append({"teacher": teacher, "students": students})
                 ctx["expected"] += len(students)
                 ctx["marked"] += sum(1 for s in students if s["present"])
-            rooms.append({"room": room, "label": ROOM_LABEL.get(room, room),
+            # A make-up row with no subject recorded would otherwise render an
+            # unlabelled block, which reads as a glitch rather than as missing
+            # information in the Sheet.
+            rooms.append({"room": room,
+                          "label": ROOM_LABEL.get(room) or room or "Room not recorded",
                           "groups": groups})
         by_room_total = sum(len(g["students"]) for r in rooms for g in r["groups"])
         by_room_marked = sum(1 for r in rooms for g in r["groups"]
