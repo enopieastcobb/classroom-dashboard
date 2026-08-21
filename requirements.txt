@@ -25,7 +25,15 @@ packaging==26.2
 pandas==3.0.5
 plotly==6.9.0
 proto-plus==1.28.2
-protobuf==7.35.1
+# Not pinned exactly, because google-cloud-firestore caps protobuf below 7.0
+# while everything else here accepts anything under 8.0. A hard pin at 7.35.1
+# made the two unsatisfiable and failed the build outright.
+#
+# Safe to relax: protobuf matters to gRPC clients, and the only gRPC client
+# here is Firestore. Classroom and Sheets go through google-api-python-client,
+# which speaks REST and JSON, so nothing on the existing paths changes.
+# Re-pin with pip freeze once a build has settled on a version.
+protobuf<7.0.0
 pyasn1==0.6.4
 pyasn1_modules==0.4.2
 pycparser==3.0
