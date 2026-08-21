@@ -1113,6 +1113,46 @@ def _time_key(t: str) -> tuple:
         return (1, t)
 
 
+def _roster_for(on: date) -> List[Dict[str, str]]:
+    """
+    Everyone expected on a date: the weekly roster, plus that date's make-ups
+    and help sessions.
+
+    Shared by the register and the absence report so both agree on who was due.
+    Computed the same way in both places, they could drift apart and have the
+    report contradict the screen the marks were made on.
+    """
+    day = on.strftime('%A')
+    if day not in ScheduleService.DAYS:
+        return []
+    schedule = get_day_schedule_cached(day)
+    out: List[Dict[str, str]] = []
+    for e in schedule["entries"]:
+        name = (e.get("student_name") or "").strip()
+        if name:
+            out.append({"name": name, "time": e.get("time") or '',
+                        "room": e.get("subject") or '',
+                        "group": e.get("teacher") or '', "note": ''})
+    # Make-ups are dated, so they belong to THIS date only.
+    for mu in schedule.get("makeups") or []:
+        if mu.get("date") != on:
+            continue
+        name = (mu.get("student_name") or "").strip()
+        if not name:
+            continue
+        is_help = bool(HELP_NOTE_RE.search(mu.get("notes") or ''))
+        # A make-up child sits in the ordinary class, so they belong to that
+        # room. A help child usually does not -- they are put in a separate
+        # room with a grader overseeing them -- so filing them under Maths
+        # would send the admin to a room the child is not in. Their subject
+        # follows as a note, since whoever supervises needs to know it.
+        out.append({"name": name, "time": mu.get("time") or '',
+                    "room": HELP_GROUP if is_help else (mu.get("subject") or ''),
+                    "group": '' if is_help else MAKEUP_GROUP,
+                    "note": (mu.get("subject") or '') if is_help else ''})
+    return out
+
+
 def _attendance_context(request: Request, form, teacher_email: str):
     """
     The day's roster, grouped for someone walking the rooms with a tablet.
@@ -1145,30 +1185,7 @@ def _attendance_context(request: Request, form, teacher_email: str):
     if not ctx["is_session_day"]:
         return ctx
 
-    schedule = get_day_schedule_cached(day)
-    entries = list(schedule["entries"])
-    # Make-ups sit in their own dated table, so a child making up a missed
-    # session only belongs to THIS date. They are folded into the same hours as
-    # the regular roster because the admin counting heads in a room needs one
-    # number, not two lists to add up.
-    for mu in schedule.get("makeups") or []:
-        if mu.get("date") != on:
-            continue
-        name = (mu.get("student_name") or "").strip()
-        if not name:
-            continue
-        is_help = bool(HELP_NOTE_RE.search(mu.get("notes") or ''))
-        # A make-up child sits in the ordinary class, so they belong to that
-        # room. A HELP child usually does not: they are put in a separate room
-        # with a grader or front-desk staff overseeing them, so filing them
-        # under Maths would send the admin looking in a room they are not in.
-        # Their subject follows them as a note instead, since whoever is
-        # supervising still needs to know what the child is working on.
-        entries.append({"time": mu.get("time") or '',
-                        "subject": HELP_GROUP if is_help else (mu.get("subject") or ''),
-                        "teacher": '' if is_help else MAKEUP_GROUP,
-                        "note": (mu.get("subject") or '') if is_help else '',
-                        "student_name": name})
+    roster = _roster_for(on)
 
     try:
         ctx["present"] = attendance.present_on(on.isoformat())
@@ -1179,16 +1196,11 @@ def _attendance_context(request: Request, form, teacher_email: str):
 
     # Grouped hour -> room -> teacher, which is the order the rooms are walked
     # rather than the order the Sheet happens to list them in.
-    by_hour: Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]] = {}
-    for e in entries:
-        name = (e.get("student_name") or "").strip()
-        if not name:
-            continue
-        room = e.get("subject") or ""
-        (by_hour.setdefault(e.get("time") or "", {})
-               .setdefault(room, {})
-               .setdefault(e.get("teacher") or "", [])).append(
-                   (name, e.get("note") or ''))
+    by_hour: Dict[str, Dict[str, Dict[str, List[Any]]]] = {}
+    for e in roster:
+        (by_hour.setdefault(e["time"], {})
+               .setdefault(e["room"], {})
+               .setdefault(e["group"], [])).append((e["name"], e["note"]))
 
     for hour in sorted(by_hour, key=_time_key):
         rooms = []
@@ -1232,6 +1244,29 @@ def _attendance_context(request: Request, form, teacher_email: str):
                              "missing": missing,
                              "is_now": _is_current_hour(hour, on)})
     return ctx
+
+
+def _hour_finished(session_time: str, on: date, now: Optional[datetime] = None) -> bool:
+    """
+    Whether this session hour is over, so absence can be judged.
+
+    An hour that has not finished tells you nothing about who is away: at four
+    o'clock the five and six o'clock children simply have not arrived, and a
+    child can still walk in at ten past. Counting them absent would report most
+    of the centre as missing every afternoon.
+
+    A past date is entirely finished; a future one entirely unfinished.
+    """
+    today = today_local()
+    if on < today:
+        return True
+    if on > today:
+        return False
+    try:
+        start = datetime.strptime(session_time.strip(), "%I:%M %p")
+    except (ValueError, AttributeError):
+        return False
+    return (now or now_local()).hour > start.hour
 
 
 def _is_current_hour(session_time: str, on: date) -> bool:
@@ -1302,7 +1337,7 @@ async def attendance_report(request: Request):
            "from_label": frm.strftime('%a %b %-d'),
            "to_label": to.strftime('%a %b %-d'),
            "idToken": form.get("credential") or form.get("idToken") or "",
-           "rows": [], "sessions": 0, "error": "",
+           "rows": [], "sessions": 0, "error": "", "absent_days": [],
            "student": (form.get("student") or "").strip()}
     try:
         records = attendance.records_between(frm.isoformat(), to.isoformat())
@@ -1312,6 +1347,51 @@ async def attendance_report(request: Request):
                        if attendance.slug(r.get('student') or '') == want]
         ctx["rows"] = attendance.summarise(records)
         ctx["sessions"] = len({r.get('date') for r in records if r.get('date')})
+
+        # Who was away, hour by hour. Only hours that have FINISHED count: an
+        # hour still running, or still to come, says nothing about absence.
+        # Filtered per hour rather than per day so today's early sessions can be
+        # reported while the later ones stay open.
+        present_by_date: Dict[str, set] = {}
+        for r in records:
+            d = r.get('date') or ''
+            if d:
+                present_by_date.setdefault(d, set()).add(
+                    attendance.slug(r.get('student') or ''))
+        if not ctx["student"]:
+            d = frm
+            while d <= to:
+                if d.strftime('%A') in ScheduleService.DAYS:
+                    seen = present_by_date.get(d.isoformat(), set())
+                    by_hour: Dict[str, List[Dict[str, str]]] = {}
+                    for e in _roster_for(d):
+                        by_hour.setdefault(e["time"], []).append(e)
+                    hours = []
+                    for hour in sorted(by_hour, key=_time_key):
+                        if not _hour_finished(hour, d):
+                            continue
+                        away = [e for e in by_hour[hour]
+                                if attendance.slug(e["name"]) not in seen]
+                        if not away:
+                            continue
+                        hours.append({
+                            "time": hour,
+                            "count": len(away),
+                            "expected": len(by_hour[hour]),
+                            "students": sorted(
+                                ({"name": e["name"],
+                                  "room": HELP_ROOM_LABEL if e["room"] == HELP_GROUP
+                                          else (ROOM_LABEL.get(e["room"]) or e["room"]
+                                                or '')}
+                                 for e in away),
+                                key=lambda a: a["name"])})
+                    if hours:
+                        ctx["absent_days"].append({
+                            "date": d.isoformat(),
+                            "label": d.strftime('%a %b %-d'),
+                            "count": sum(h["count"] for h in hours),
+                            "hours": hours})
+                d += timedelta(days=1)
     except Exception as e:
         logger.error("Attendance report failed: %s", e, exc_info=True)
         ctx["error"] = f"Could not read attendance ({type(e).__name__})."

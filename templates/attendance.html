@@ -5,12 +5,37 @@
 <style>
   /* Sized for a tablet held in one hand while walking. Every target is well
      over the 44px minimum, because a mis-tap costs a child's attendance. */
-  .att-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px 18px;
-              margin:0 0 18px; }
-  .att-head h1 { font-size:20px; margin:0; }
-  .att-date { display:flex; align-items:center; gap:8px; font-size:14px; }
-  .att-date input { font-size:16px; padding:8px 10px; border:1px solid #d1d5db;
-                    border-radius:8px; }
+  /* A banded header so the controls sit on their own ground rather than
+     floating above the register. Dark, because on a tablet held at an angle a
+     pale bar disappears and the date control with it. */
+  .att-head {
+    display:flex; flex-wrap:wrap; align-items:center; gap:14px 22px;
+    background:linear-gradient(135deg, #111827 0%, #1f2b3e 100%);
+    color:#fff; border-radius:14px; padding:18px 22px; margin:0 0 6px;
+  }
+  .att-title { display:flex; flex-direction:column; gap:3px; margin-right:auto; }
+  .att-head h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
+  .att-title .att-when { font-size:13px; color:#9fb0c8; }
+  .att-date { display:flex; align-items:center; gap:8px; font-size:13px;
+              color:#9fb0c8; }
+  .att-date input {
+    font-size:16px; padding:9px 11px; border-radius:9px;
+    border:1px solid #3a4a63; background:#0b1220; color:#fff;
+    color-scheme:dark;
+  }
+  .att-date input:focus-visible { outline:2px solid #7aa2e3; outline-offset:1px; }
+
+  /* The tally reads as a figure rather than a sentence -- it is the one number
+     glanced at repeatedly while walking. */
+  .att-tally { display:flex; align-items:baseline; gap:7px;
+               font-variant-numeric:tabular-nums; }
+  .att-tally .n { font-size:30px; font-weight:700; line-height:1; }
+  .att-tally .of { font-size:13px; color:#9fb0c8; }
+  .att-bar { flex:0 0 100%; height:6px; border-radius:999px;
+             background:#31405a; overflow:hidden; }
+  .att-bar span { display:block; height:100%; background:#6ee7a8;
+                  border-radius:999px; transition:width .2s; }
+
   .att-count { font-size:14px; color:#6b7280; font-variant-numeric:tabular-nums; }
   .att-count b { color:#111827; }
 
@@ -80,14 +105,21 @@
 </style>
 
 <div class="att-head">
-  <h1>Attendance</h1>
+  <div class="att-title">
+    <h1>Attendance</h1>
+    <span class="att-when">{{ on_label }} · {{ day }}</span>
+  </div>
   <form method="POST" action="/attendance" class="att-date">
-    <input type="hidden" name="credential" value="{{ idToken }}">
+    <input type="hidden" name="idToken" value="{{ idToken }}">
     <label for="on">Date</label>
     <input type="date" id="on" name="on" value="{{ on }}" data-autosubmit>
   </form>
-  <span class="att-count"><b>{{ marked }}</b> of {{ expected }} marked
-    · {{ on_label }}</span>
+  <div class="att-tally">
+    <span class="n" id="tally-n">{{ marked }}</span>
+    <span class="of">of {{ expected }} checked in</span>
+  </div>
+  <div class="att-bar"><span id="tally-bar" style="width:{{
+    ((marked / expected) * 100) | round if expected else 0 }}%"></span></div>
 </div>
 
 <form method="POST" action="/attendance/report" style="margin:-6px 0 16px;">
@@ -155,13 +187,12 @@
         var c = sec.querySelector('.att-hour-bar .att-count');
         if (c) { c.innerHTML = '<b>' + on_ + '</b>/' + tiles.length; }
       });
-      var all = document.querySelectorAll('.att-tile');
+      var all = document.querySelectorAll('.att-tile').length;
       var marked = document.querySelectorAll('.att-tile[aria-pressed="true"]').length;
-      var top = document.querySelector('.att-head .att-count');
-      if (top) {
-        top.innerHTML = '<b>' + marked + '</b> of ' + all.length + ' marked · ' +
-                        {{ on_label | tojson }};
-      }
+      var n = document.getElementById('tally-n');
+      var bar = document.getElementById('tally-bar');
+      if (n) { n.textContent = marked; }
+      if (bar) { bar.style.width = (all ? (marked / all) * 100 : 0) + '%'; }
     }
 
     document.querySelectorAll('.att-tile').forEach(function (tile) {

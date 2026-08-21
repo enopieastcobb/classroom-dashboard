@@ -3,17 +3,46 @@
 
 {% block content %}
 <style>
-  .rep-head { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 16px;
-              margin:0 0 18px; }
-  .rep-head h1 { font-size:20px; margin:0; flex:1 1 auto; }
+  /* Banded like the register, so the two pages read as one tool. */
+  .rep-head {
+    background:linear-gradient(135deg, #111827 0%, #1f2b3e 100%);
+    color:#fff; border-radius:14px; padding:18px 22px; margin:0 0 18px;
+    display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px 20px;
+  }
+  .rep-head h1 { font-size:22px; margin:0 auto 0 0; letter-spacing:-.01em; }
+  .rep-head .rep-when { font-size:13px; color:#9fb0c8; display:block;
+                        font-weight:400; margin-top:3px; letter-spacing:0; }
   .rep-form { display:flex; flex-wrap:wrap; align-items:flex-end; gap:10px; }
   .rep-form label { display:flex; flex-direction:column; gap:4px; font-size:12px;
-                    color:#6b7280; }
-  .rep-form input { font-size:16px; padding:8px 10px; border:1px solid #d1d5db;
-                    border-radius:8px; }
-  .rep-form button { font-size:15px; font-weight:600; padding:9px 16px;
-                     background:#111827; color:#fff; border:1px solid #111827;
-                     border-radius:8px; cursor:pointer; }
+                    color:#9fb0c8; }
+  .rep-form input { font-size:16px; padding:9px 11px; border-radius:9px;
+                    border:1px solid #3a4a63; background:#0b1220; color:#fff;
+                    color-scheme:dark; }
+  .rep-form input:focus-visible { outline:2px solid #7aa2e3; outline-offset:1px; }
+  .rep-form button { font-size:15px; font-weight:600; padding:10px 18px;
+                     background:#6ee7a8; color:#08301d; border:none;
+                     border-radius:9px; cursor:pointer; }
+  .rep-form button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+
+  /* Absence, day by day. Amber rather than red: a child being away is
+     information, not an error. */
+  .abs { margin:26px 0 0; }
+  .abs h2 { font-size:17px; margin:0 0 4px; }
+  .abs-caveat { font-size:12px; color:#6b7280; margin:0 0 12px; max-width:46rem; }
+  .abs-day { border:1px solid #f0d3ae; background:#fffaf3; border-radius:10px;
+             padding:12px 14px; margin:0 0 10px; }
+  .abs-day-head { display:flex; align-items:baseline; gap:10px; margin:0 0 8px; }
+  .abs-day-head b { font-size:15px; }
+  .abs-day-head .abs-n { font-size:13px; color:#7a3a12;
+                         font-variant-numeric:tabular-nums; margin-left:auto; }
+  .abs-hour { margin:0 0 10px; }
+  .abs-hour:last-child { margin-bottom:0; }
+  .abs-hour-name { font-size:12px; letter-spacing:.06em; text-transform:uppercase;
+                   color:#8a6a42; margin:0 0 5px; font-weight:600; }
+  .abs-list { display:flex; flex-wrap:wrap; gap:6px; }
+  .abs-chip { font-size:13px; background:#fff; border:1px solid #eadfce;
+              border-radius:999px; padding:5px 11px; }
+  .abs-chip .abs-meta { color:#8a7358; font-size:12px; }
   .rep-sum { font-size:14px; color:#6b7280; margin:0 0 14px; }
   .rep-sum b { color:#111827; }
   .rep-note { font-size:13px; color:#8a2020; margin:0 0 14px; }
@@ -30,7 +59,7 @@
 </style>
 
 <div class="rep-head">
-  <h1>Attendance record</h1>
+  <h1>Attendance record<span class="rep-when">{{ from_label }} – {{ to_label }}</span></h1>
   <form method="POST" action="/attendance/report" class="rep-form">
     <input type="hidden" name="credential" value="{{ idToken }}">
     <label>From <input type="date" name="from" value="{{ from }}"></label>
@@ -81,10 +110,38 @@
 </div>
 {% endif %}
 
+{% if absent_days %}
+<section class="abs">
+  <h2>Who was away</h2>
+  <p class="abs-caveat">Only hours that have <b>finished</b> are counted — an hour
+    still running says nothing about who is away, since a child can walk in at
+    ten past. Worked out against the current schedule, so it is reliable for
+    recent dates; for older ones a child who has since moved to another day may
+    appear here wrongly, because the schedule sheet is edited as children change
+    hours.</p>
+  {% for d in absent_days %}
+  <div class="abs-day">
+    <div class="abs-day-head">
+      <b>{{ d.label }}</b>
+      <span class="abs-n">{{ d.count }} away</span>
+    </div>
+    {% for h in d.hours %}
+    <div class="abs-hour">
+      <p class="abs-hour-name">{{ h.time }} · {{ h.count }} of {{ h.expected }}</p>
+      <div class="abs-list">
+        {% for a in h.students %}
+        <span class="abs-chip">{{ a.name }}{% if a.room %}<span class="abs-meta"> ·
+          {{ a.room }}</span>{% endif %}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</section>
+{% elif not student %}
 <p class="rep-sum" style="margin-top:18px;">
-  This counts attendance only. Absence is not shown, because working it out
-  would need the schedule as it stood on each past date — and the schedule is
-  edited as children move days, so a count of missed sessions against today's
-  roster would be wrong about the past.
+  Nobody was away on the class days in this period.
 </p>
+{% endif %}
 {% endblock %}
