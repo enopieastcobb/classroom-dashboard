@@ -1045,6 +1045,14 @@ ROOM_LABEL = {"English": "English Room", "Math": "Math Room", "Weenopi": "Weenop
 WALKIN_GROUP = "Walk-ins"
 # Make-ups come from the schedule Sheet's own dated make-up table.
 MAKEUP_GROUP = "Make-ups"
+# Extra help sessions live in the same dated table as make-ups, told apart by
+# "Help" in its Notes column -- they are for children carrying more FICs than
+# their own hour can clear. Same table, different reason to be in the room, so
+# the register names them separately: an admin counting heads wants to know
+# which of these children is catching up a missed session and which is here for
+# extra support.
+HELP_GROUP = "Help session"
+HELP_NOTE_RE = re.compile(r'\bhelp\b', re.IGNORECASE)
 
 
 def simulated_now(raw: str) -> Optional[datetime]:
@@ -1146,7 +1154,9 @@ def _attendance_context(request: Request, form, teacher_email: str):
             continue
         entries.append({"time": mu.get("time") or '',
                         "subject": mu.get("subject") or '',
-                        "teacher": MAKEUP_GROUP,
+                        "teacher": (HELP_GROUP
+                                    if HELP_NOTE_RE.search(mu.get("notes") or '')
+                                    else MAKEUP_GROUP),
                         "student_name": name})
 
     try:
