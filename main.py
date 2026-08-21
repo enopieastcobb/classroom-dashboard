@@ -1326,10 +1326,10 @@ async def attendance_page(request: Request):
 
 DIGEST_SENDER = os.environ.get("DIGEST_SENDER", "admin@enopieastcobb.com")
 DIGEST_TO = os.environ.get("DIGEST_TO", "info@enopieastcobb.com")
-# Cloud Run already refuses anyone who is not an authorised invoker, so this is
-# a second lock rather than the only one: it stops a mis-scheduled or replayed
-# request sending mail, and makes the endpoint safe to leave in place.
-DIGEST_TOKEN = os.environ.get("DIGEST_TOKEN", "")
+# No DIGEST_TOKEN and no /digest route: the digest runs as a Cloud Run Job
+# (digest_job.py), so it has no network surface to authenticate. An endpoint
+# would have needed ingress opened for Cloud Scheduler to reach it, adding a
+# second front door to a design whose point is that IAP is the only one.
 
 
 def _digest_sections(on: date, teacher_email: str):
@@ -1413,66 +1413,6 @@ def _digest_sections(on: date, teacher_email: str):
                              "room": ROOM_LABEL.get(room, room),
                              "items": items_out})
     return sections, checked
-
-
-@app.post("/digest")
-async def digest(request: Request):
-    """
-    Emails everything still outstanding for a date. Driven by Cloud Scheduler.
-
-    Runs after the last session of the day, so every hour has finished and
-    nothing in it is merely "not handed over yet".
-    """
-    # Checked from the header BEFORE the body is read: an unauthorised caller
-    # should not get its payload parsed, and this way the gate can be tested
-    # without a form parser present.
-    supplied = request.headers.get("X-Digest-Token") or ""
-    if not DIGEST_TOKEN or not secrets.compare_digest(supplied, DIGEST_TOKEN):
-        logger.warning("Digest called without a valid token.")
-        return JSONResponse({"ok": False, "error": "not authorised"},
-                            status_code=403)
-
-    form = await request.form()
-    raw = (form.get("on") or "").strip()
-    try:
-        on = date.fromisoformat(raw) if raw else today_local()
-    except ValueError:
-        on = today_local()
-
-    force = (form.get("force") or "") == "1"
-    try:
-        # One email per date, whatever happens upstream. Cloud Scheduler retries
-        # on any non-2xx, the job can be run by hand, and a loop anywhere could
-        # otherwise burn the mailbox's daily sending quota and get it blocked.
-        if not force and attendance.digest_already_sent(on.isoformat()):
-            logger.info("Digest for %s already sent; not sending again.", on)
-            return JSONResponse({"ok": True, "skipped": "already sent",
-                                 "date": on.isoformat()})
-        sections, checked = _digest_sections(on, DIGEST_SENDER)
-        # A refresh token for one mailbox, not domain-wide delegation -- see
-        # email_service.sender_credentials. The Classroom and Sheets delegation
-        # stays exactly as narrow as it already is.
-        creds = email_service.sender_credentials()
-        outstanding = sum(len(s["items"]) for s in sections)
-        subject = (f"Booklets outstanding — {on.strftime('%a %b %-d')}"
-                   if outstanding else
-                   f"Nothing outstanding — {on.strftime('%a %b %-d')}")
-        msg_id = email_service.send_digest(
-            creds, sender=DIGEST_SENDER, to=DIGEST_TO, subject=subject,
-            sections=sections, date_label=on.strftime('%a %b %-d'),
-            checked=checked)
-        attendance.record_digest_sent(on.isoformat(), to=DIGEST_TO,
-                                      findings=outstanding, message_id=msg_id)
-    except Exception as e:
-        logger.error("Digest failed for %s: %s", on, e, exc_info=True)
-        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},
-                            status_code=500)
-
-    logger.info("DIGEST SENT for %s: %d findings across %d sessions",
-                on, outstanding, checked)
-    return JSONResponse({"ok": True, "date": on.isoformat(),
-                         "findings": outstanding, "sessions": checked,
-                         "message_id": msg_id})
 
 
 @app.post("/attendance/walkin")
