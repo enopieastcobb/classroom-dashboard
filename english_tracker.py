@@ -50,6 +50,16 @@ WRITING_MAX_GRADE = 1
 # The reading and writing levels drift apart: a grade-1 child can be on reading
 # level D and writing level F at the same time, since by first grade they are
 # moved to E or F whatever their reading level.
+# How far up the writing ladder a child may properly be, by grade. A child works
+# from their reading level up to this, so a Gr K child on reading C may be on C,
+# D or E -- but not F, which is where Sravya G was wrongly placed.
+#
+# Pre-K and Weenopi share the kindergarten ceiling. Nothing states a lower one
+# for them, and a ceiling that is too generous only misses a find, whereas one
+# that is too tight accuses a teacher who did nothing wrong.
+WRITING_CEILING_BELOW_1 = 'E'
+WRITING_CEILING_GRADE_1 = 'F'
+
 WRITING_SINGLE_BOOK_LEVELS = frozenset('ABCDE')
 WRITING_BOOKS_PER_LEVEL = 4
 
@@ -627,15 +637,17 @@ def _writing_state(reading, writing, grade, today=None) -> Optional[Dict[str, An
         return {'series': 'EW', 'kind': 'writing_missing', 'expected': [],
                 'severe': False,
                 'detail': "no essay writing booklet assigned"}
+    # The writing level runs from the child's reading level up to a ceiling set
+    # by their grade: E for kindergarten and below, F once they reach grade 1.
+    #
+    # Not "reading level or one above", which is how this started: a Gr K child
+    # on reading C may properly be on C, D or E. Sravya G was given F-1 at Gr K,
+    # which the ceiling catches -- and it was a real mis-issue, the first thing
+    # the digest found.
     wi = WRITING_LEVELS.index(pos['level'])
-    allowed = {WRITING_LEVELS[wi]}
-    if wi + 1 < len(WRITING_LEVELS):
-        allowed.add(WRITING_LEVELS[wi + 1])
-    # The pairing loosens at grade 1: a child who has reached first grade is
-    # moved to E or F writing whatever their reading level. Aadhya P is on
-    # reading D with writing F-1, which the general rule alone would flag.
-    if grade == 1:
-        allowed |= {'E', 'F'}
+    ceiling = WRITING_CEILING_GRADE_1 if grade == 1 else WRITING_CEILING_BELOW_1
+    top = max(wi, WRITING_LEVELS.index(ceiling))
+    allowed = set(WRITING_LEVELS[wi:top + 1])
     here = [w for w in writing if w['level'] in allowed]
     if not here:
         best = max(writing, key=lambda w: WRITING_LEVELS.index(w['level']))

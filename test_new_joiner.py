@@ -145,3 +145,41 @@ check('writing: Weenopi with no writing booklet at all',
       ['no essay writing booklet assigned'])
 print()
 print('all pass' if not fails else 'FAILURES:\n  ' + '\n  '.join(fails))
+
+
+# --- the writing ceiling, by grade -----------------------------------------
+# Sravya G, Gr K, was given writing F-1 while on reading level C. The digest
+# caught it and it was a real mis-issue -- but the message said "expected C or
+# D", because the rule was "reading level or one above". The true allowance runs
+# from the reading level up to a ceiling: E for kindergarten and below, F once
+# a child reaches grade 1.
+def _w(reading, writing, section):
+    items = [eng(reading, '2026-05-01')]
+    if writing:
+        items.append(eng(writing, '2026-05-01'))
+    return [x for x in review_english(items, T, section)['notes'] if 'writing' in x]
+
+
+GRK, GR1 = 'Gr K [2026-2027]', 'Gr 1[2026-2027]'
+ceiling_cases = [
+    # Gr K on reading C: C, D and E are all proper; F is not, and nor is B.
+    ('Gr K, reading C, writing C', 'ENG C-4 hc', 'Essay Writing C1', GRK, False),
+    ('Gr K, reading C, writing D', 'ENG C-4 hc', 'Essay Writing D1', GRK, False),
+    ('Gr K, reading C, writing E', 'ENG C-4 hc', 'Essay Writing E1', GRK, False),
+    ('Gr K, reading C, writing F  <- Sravya', 'ENG C-4 hc', 'Essay Writing F1', GRK, True),
+    ('Gr K, reading C, writing B  (behind)', 'ENG C-4 hc', 'Essay Writing B1', GRK, True),
+    # Grade 1 lifts the ceiling to F.
+    ('Gr 1, reading D, writing F', 'ENG D-13 hc', 'Essay Writing F1', GR1, False),
+    ('Gr 1, reading D, writing G', 'ENG D-13 hc', 'Essay Writing G1', GR1, True),
+    # Pre-K and Weenopi share the kindergarten ceiling.
+    ('Pre-K, reading B, writing D', 'ENG B-9 hc', 'Essay Writing D1',
+     'Pre-K [2026-2027]', False),
+    ('Weenopi, reading A, writing F', 'ENG A-4 hc', 'Essay Writing F1',
+     'Weenopi [2026-2027]', True),
+]
+for name, reading, writing, section, want_flag in ceiling_cases:
+    got = bool(_w(reading, writing, section))
+    check(name, ['flagged'] if got else [], ['flagged'] if want_flag else [])
+
+print()
+print('all pass' if not fails else 'FAILURES:\n  ' + '\n  '.join(fails))
