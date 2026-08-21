@@ -1439,7 +1439,15 @@ async def digest(request: Request):
     except ValueError:
         on = today_local()
 
+    force = (form.get("force") or "") == "1"
     try:
+        # One email per date, whatever happens upstream. Cloud Scheduler retries
+        # on any non-2xx, the job can be run by hand, and a loop anywhere could
+        # otherwise burn the mailbox's daily sending quota and get it blocked.
+        if not force and attendance.digest_already_sent(on.isoformat()):
+            logger.info("Digest for %s already sent; not sending again.", on)
+            return JSONResponse({"ok": True, "skipped": "already sent",
+                                 "date": on.isoformat()})
         sections, checked = _digest_sections(on, DIGEST_SENDER)
         creds = get_scoped_creds(email_service.GMAIL_SCOPES,
                                  subject=DIGEST_SENDER)
@@ -1451,6 +1459,8 @@ async def digest(request: Request):
             creds, sender=DIGEST_SENDER, to=DIGEST_TO, subject=subject,
             sections=sections, date_label=on.strftime('%a %b %-d'),
             checked=checked)
+        attendance.record_digest_sent(on.isoformat(), to=DIGEST_TO,
+                                      findings=outstanding, message_id=msg_id)
     except Exception as e:
         logger.error("Digest failed for %s: %s", on, e, exc_info=True)
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},

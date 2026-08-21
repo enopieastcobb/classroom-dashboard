@@ -156,3 +156,25 @@ def summarise(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     'rooms': ', '.join(sorted(row['rooms'])),
                     'dates': row['dates']})
     return sorted(out, key=lambda r: (-r['attended'], r['student']))
+
+
+# --- digest send-once guard ------------------------------------------------
+#
+# One email per date, however many times the endpoint is called. Cloud
+# Scheduler retries on any non-2xx, a job can be triggered by hand, and a loop
+# anywhere would otherwise be able to empty the mailbox's daily sending quota.
+# Cheap: one small document a day.
+DIGEST_COLLECTION = "digest_sent"
+
+
+def digest_already_sent(day_iso: str) -> bool:
+    return _db().collection(DIGEST_COLLECTION).document(day_iso).get().exists
+
+
+def record_digest_sent(day_iso: str, *, to: str, findings: int,
+                       message_id: str) -> None:
+    _db().collection(DIGEST_COLLECTION).document(day_iso).set({
+        'date': day_iso, 'to': to, 'findings': findings,
+        'message_id': message_id,
+        'sent_at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+    })
