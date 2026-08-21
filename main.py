@@ -1449,8 +1449,10 @@ async def digest(request: Request):
             return JSONResponse({"ok": True, "skipped": "already sent",
                                  "date": on.isoformat()})
         sections, checked = _digest_sections(on, DIGEST_SENDER)
-        creds = get_scoped_creds(email_service.GMAIL_SCOPES,
-                                 subject=DIGEST_SENDER)
+        # A refresh token for one mailbox, not domain-wide delegation -- see
+        # email_service.sender_credentials. The Classroom and Sheets delegation
+        # stays exactly as narrow as it already is.
+        creds = email_service.sender_credentials()
         outstanding = sum(len(s["items"]) for s in sections)
         subject = (f"Booklets outstanding — {on.strftime('%a %b %-d')}"
                    if outstanding else

@@ -11,12 +11,46 @@ sent AS the sender address, so it lands in that mailbox's Sent folder.
 """
 import base64
 import logging
+import os
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+TOKEN_URI = 'https://oauth2.googleapis.com/token'
+
+
+def sender_credentials():
+    """
+    Credentials that can send as exactly ONE mailbox.
+
+    A refresh token obtained once by consenting as the sending address, held in
+    Secret Manager and mounted as GMAIL_REFRESH_TOKEN. Deliberately not
+    domain-wide delegation: adding gmail.send there would let the service
+    account send as any user in the domain, which is far more than a weekly
+    digest needs and a grant that outlives whatever it was added for.
+
+    Everything is stripped of surrounding whitespace. Storing a secret from
+    stdin puts a trailing newline in it if Enter is pressed before Ctrl-D, and
+    a token that fails because of an invisible character is a miserable thing
+    to debug -- so this does not depend on anyone's keystrokes being exact.
+    """
+    from google.oauth2.credentials import Credentials
+
+    refresh_token = (os.environ.get('GMAIL_REFRESH_TOKEN') or '').strip()
+    client_id = (os.environ.get('GMAIL_CLIENT_ID') or '').strip()
+    client_secret = (os.environ.get('GMAIL_CLIENT_SECRET') or '').strip()
+    missing = [n for n, v in (('GMAIL_REFRESH_TOKEN', refresh_token),
+                              ('GMAIL_CLIENT_ID', client_id),
+                              ('GMAIL_CLIENT_SECRET', client_secret)) if not v]
+    if missing:
+        raise RuntimeError("Digest mail is not configured: missing "
+                           + ", ".join(missing))
+
+    return Credentials(
+        token=None, refresh_token=refresh_token, token_uri=TOKEN_URI,
+        client_id=client_id, client_secret=client_secret, scopes=GMAIL_SCOPES)
 
 
 def _plain(subject_line: str, sections: List[Dict[str, Any]], date_label: str,
