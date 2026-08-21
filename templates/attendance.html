@@ -100,11 +100,15 @@
   /* One box per room, because the admin is standing in that room -- naming the
      hour and room again would be two taps they should not need. */
   .att-add { display:flex; gap:8px; margin:10px 0 0; }
+  /* Tinted rather than near-white: on a tablet the dashed outline on #fbfbfc
+     was invisible against the page, so the box read as empty space. */
   .att-add input {
     flex:1 1 200px; max-width:340px; font-size:15px; padding:10px 12px;
-    border:1px dashed #c7cdd6; border-radius:10px; background:#fbfbfc;
+    border:1px dashed #a8b4c6; border-radius:10px;
+    background:#eef2f8; color:#111827;
   }
-  .att-add input:focus { border-style:solid; border-color:#111827;
+  .att-add input::placeholder { color:#5b6b80; }
+  .att-add input:focus { border-style:solid; border-color:#2563eb;
                          background:#fff; outline:none; }
   .att-add button {
     font-size:15px; font-weight:600; padding:10px 16px; font-family:inherit;
