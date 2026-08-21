@@ -1188,10 +1188,14 @@ def _attendance_context(request: Request, form, teacher_email: str):
     roster = _roster_for(on)
 
     try:
-        ctx["present"] = attendance.present_on(on.isoformat())
+        # Full records, not just names: a walk-in exists only as an attendance
+        # record, so its hour and room must be read back to place the tile.
+        records = attendance.records_on(on.isoformat())
+        ctx["present"] = {attendance.slug(r.get('student') or '') for r in records}
     except Exception as e:
         # The roster is still worth showing: an admin can mark from a page that
         # could not read back what was already marked, and the marks will land.
+        records = []
         ctx["error"] = f"Could not read what has already been marked ({type(e).__name__})."
 
     # Grouped hour -> room -> teacher, which is the order the rooms are walked
@@ -1201,6 +1205,19 @@ def _attendance_context(request: Request, form, teacher_email: str):
         (by_hour.setdefault(e["time"], {})
                .setdefault(e["room"], {})
                .setdefault(e["group"], [])).append((e["name"], e["note"]))
+
+    # Anyone marked present who is not on the schedule turned up unannounced.
+    # They need no storage of their own -- the attendance record IS the walk-in,
+    # carrying the hour and room it was added in -- so they reappear on reload
+    # with no second place for the data to drift out of step.
+    on_roster = {attendance.slug(e["name"]) for e in roster}
+    for r in records:
+        name = (r.get('student') or '').strip()
+        if not name or attendance.slug(name) in on_roster:
+            continue
+        (by_hour.setdefault(r.get('time') or '', {})
+               .setdefault(r.get('subject') or '', {})
+               .setdefault(WALKIN_GROUP, [])).append((name, ''))
 
     for hour in sorted(by_hour, key=_time_key):
         rooms = []
@@ -1303,6 +1320,50 @@ async def attendance_page(request: Request):
             "signed_out": True,
         })
     ctx = _attendance_context(request, form, teacher_email)
+    return templates.TemplateResponse(request, "attendance.html", ctx)
+
+
+@app.post("/attendance/walkin")
+async def attendance_walkin(request: Request):
+    """
+    Add a child who turned up unannounced, in the room the admin is standing in.
+
+    Marked present in the same act as being added: there is no reason to record
+    a walk-in who is not here. A full re-render follows rather than a partial
+    update -- this happens rarely, and the reload is what proves the record
+    landed rather than a tile that merely looks added.
+    """
+    form = await request.form()
+    try:
+        teacher_email = _verify_and_get_email(
+            form.get("credential") or form.get("idToken"))
+    except Exception as auth_err:
+        logger.info("Sign-in lapsed adding a walk-in: %s", auth_err)
+        return templates.TemplateResponse(request, "login.html", {
+            "google_client_id": GOOGLE_CLIENT_ID,
+            "login_action": "/attendance", "signed_out": True,
+        })
+
+    name = (form.get("student") or "").strip()
+    failed = ""
+    if name:
+        raw = (form.get("on") or "").strip()
+        try:
+            on = date.fromisoformat(raw) if raw else today_local()
+        except ValueError:
+            on = today_local()
+        try:
+            attendance.mark_present(
+                on.isoformat(), name, session_day=on.strftime('%A'),
+                subject=form.get("subject") or '', time=form.get("time") or '',
+                teacher=WALKIN_GROUP, marked_by=teacher_email)
+        except Exception as e:
+            logger.error("Walk-in write failed for %r: %s", name, e, exc_info=True)
+            failed = f"Could not add {name} ({type(e).__name__})."
+
+    ctx = _attendance_context(request, form, teacher_email)
+    if failed:
+        ctx["error"] = failed
     return templates.TemplateResponse(request, "attendance.html", ctx)
 
 

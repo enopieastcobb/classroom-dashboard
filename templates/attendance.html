@@ -97,6 +97,21 @@
   .att-link { background:none; border:none; padding:0; color:#2563eb;
               cursor:pointer; text-decoration:underline; font-size:14px;
               font-family:inherit; }
+  /* One box per room, because the admin is standing in that room -- naming the
+     hour and room again would be two taps they should not need. */
+  .att-add { display:flex; gap:8px; margin:10px 0 0; }
+  .att-add input {
+    flex:1 1 200px; max-width:340px; font-size:15px; padding:10px 12px;
+    border:1px dashed #c7cdd6; border-radius:10px; background:#fbfbfc;
+  }
+  .att-add input:focus { border-style:solid; border-color:#111827;
+                         background:#fff; outline:none; }
+  .att-add button {
+    font-size:15px; font-weight:600; padding:10px 16px; font-family:inherit;
+    background:#fff; color:#111827; border:1px solid #d1d5db;
+    border-radius:10px; cursor:pointer;
+  }
+  .att-add button:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
   .att-empty { font-size:15px; color:#6b7280; }
   @media (prefers-reduced-motion: reduce) {
     .att-tile { transition:none; }
@@ -160,6 +175,15 @@
         {% endfor %}
       </div>
       {% endfor %}
+      <form method="POST" action="/attendance/walkin" class="att-add">
+        <input type="hidden" name="idToken" value="{{ idToken }}">
+        <input type="hidden" name="on" value="{{ on }}">
+        <input type="hidden" name="time" value="{{ h.time }}">
+        <input type="hidden" name="subject" value="{{ r.room }}">
+        <input type="text" name="student" placeholder="Add someone who turned up…"
+               aria-label="Add a walk-in to {{ r.label }} at {{ h.time }}">
+        <button type="submit">Add</button>
+      </form>
     </div>
     {% endfor %}
   </section>
