@@ -44,3 +44,5 @@ tzdata==2026.1
 uritemplate==4.2.0
 urllib3==2.7.0
 uvicorn==0.51.0
+
+google-cloud-firestore==2.22.0

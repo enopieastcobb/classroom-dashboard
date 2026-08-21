@@ -27,7 +27,7 @@
 
         <!-- The session being viewed rides along, so signing back in returns the
              teacher to that day, room and hour rather than the default one. -->
-        <form id="loginForm" method="POST" action="/dashboard" style="display:none;">
+        <form id="loginForm" method="POST" action="{{ login_action or '/dashboard' }}" style="display:none;">
             <input type="hidden" name="credential" id="credentialInput">
             <input type="hidden" name="courseId" value="{{ courseId or '' }}">
             <input type="hidden" name="addOnToken" value="{{ addOnToken or '' }}">

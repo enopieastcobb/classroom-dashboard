@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Attendance record · {{ from_label }} – {{ to_label }}{% endblock %}
+
+{% block content %}
+<style>
+  .rep-head { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 16px;
+              margin:0 0 18px; }
+  .rep-head h1 { font-size:20px; margin:0; flex:1 1 auto; }
+  .rep-form { display:flex; flex-wrap:wrap; align-items:flex-end; gap:10px; }
+  .rep-form label { display:flex; flex-direction:column; gap:4px; font-size:12px;
+                    color:#6b7280; }
+  .rep-form input { font-size:16px; padding:8px 10px; border:1px solid #d1d5db;
+                    border-radius:8px; }
+  .rep-form button { font-size:15px; font-weight:600; padding:9px 16px;
+                     background:#111827; color:#fff; border:1px solid #111827;
+                     border-radius:8px; cursor:pointer; }
+  .rep-sum { font-size:14px; color:#6b7280; margin:0 0 14px; }
+  .rep-sum b { color:#111827; }
+  .rep-note { font-size:13px; color:#8a2020; margin:0 0 14px; }
+  .rep-scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; min-width:34rem; }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase;
+       color:#6b7280; font-weight:600; padding:0 12px 7px 0;
+       border-bottom:2px solid #111827; white-space:nowrap; }
+  td { padding:9px 12px 9px 0; border-bottom:1px solid #eef0f3; vertical-align:top; }
+  td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .rep-dates { font-size:12px; color:#6b7280; }
+  .rep-empty { font-size:15px; color:#6b7280; }
+  a.rep-back { font-size:14px; }
+</style>
+
+<div class="rep-head">
+  <h1>Attendance record</h1>
+  <form method="POST" action="/attendance/report" class="rep-form">
+    <input type="hidden" name="credential" value="{{ idToken }}">
+    <label>From <input type="date" name="from" value="{{ from }}"></label>
+    <label>To <input type="date" name="to" value="{{ to }}"></label>
+    <label>Student (optional)
+      <input type="text" name="student" value="{{ student }}" placeholder="any"></label>
+    <button type="submit">Show</button>
+  </form>
+</div>
+
+<form method="POST" action="/attendance" style="margin:0 0 16px;">
+  <input type="hidden" name="credential" value="{{ idToken }}">
+  <button type="submit" class="rep-back" style="background:none; border:none;
+          padding:0; color:#2563eb; cursor:pointer; text-decoration:underline;">
+    ← Back to marking attendance</button>
+</form>
+
+{% if error %}<p class="rep-note">{{ error }}</p>{% endif %}
+
+<p class="rep-sum">
+  {{ from_label }} – {{ to_label }} ·
+  <b>{{ rows | length }}</b> {{ 'child' if rows | length == 1 else 'children' }}
+  attended across <b>{{ sessions }}</b> {{ 'day' if sessions == 1 else 'days' }}
+</p>
+
+{% if not rows %}
+  <p class="rep-empty">No attendance was recorded in this period.</p>
+{% else %}
+<div class="rep-scroll">
+  <table>
+    <thead>
+      <tr><th>Student</th><th>Days attended</th><th>First</th><th>Last</th>
+          <th>Rooms</th><th>Dates</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><b>{{ r.student }}</b></td>
+        <td class="num">{{ r.attended }}</td>
+        <td class="num">{{ r.first }}</td>
+        <td class="num">{{ r.last }}</td>
+        <td>{{ r.rooms }}</td>
+        <td class="rep-dates">{{ r.dates | join(' · ') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p class="rep-sum" style="margin-top:18px;">
+  This counts attendance only. Absence is not shown, because working it out
+  would need the schedule as it stood on each past date — and the schedule is
+  edited as children move days, so a count of missed sessions against today's
+  roster would be wrong about the past.
+</p>
+{% endblock %}

@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Attendance · {{ on_label }}{% endblock %}
+
+{% block content %}
+<style>
+  /* Sized for a tablet held in one hand while walking. Every target is well
+     over the 44px minimum, because a mis-tap costs a child's attendance. */
+  .att-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px 18px;
+              margin:0 0 18px; }
+  .att-head h1 { font-size:20px; margin:0; }
+  .att-date { display:flex; align-items:center; gap:8px; font-size:14px; }
+  .att-date input { font-size:16px; padding:8px 10px; border:1px solid #d1d5db;
+                    border-radius:8px; }
+  .att-count { font-size:14px; color:#6b7280; font-variant-numeric:tabular-nums; }
+  .att-count b { color:#111827; }
+
+  .att-hour { margin:0 0 26px; }
+  .att-hour-bar { display:flex; align-items:baseline; gap:10px;
+                  border-bottom:2px solid #111827; padding-bottom:6px;
+                  margin-bottom:12px; position:sticky; top:0; background:#fff;
+                  z-index:2; }
+  .att-hour-bar h2 { font-size:18px; margin:0; }
+  .att-hour-bar .att-count { margin-left:auto; }
+
+  .att-room { margin:0 0 14px; }
+  .att-room-name { font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+                   color:#6b7280; margin:0 0 6px; }
+  .att-teacher { font-size:13px; color:#374151; margin:10px 0 6px; font-weight:600; }
+
+  .att-tiles { display:grid; gap:10px;
+               grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); }
+  /* A button, not a div: it is focusable and works from a keyboard as well as
+     a thumb. */
+  .att-tile {
+    display:flex; align-items:center; gap:10px; width:100%;
+    min-height:64px; padding:12px 14px; text-align:left;
+    font-size:17px; font-weight:600; font-family:inherit;
+    background:#fff; color:#111827;
+    border:2px solid #d1d5db; border-radius:12px; cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    transition:background .12s, border-color .12s;
+  }
+  .att-tile:active { transform:scale(.985); }
+  .att-tile:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
+  /* Presence is shown by the tick AND the fill, so it does not rest on colour
+     alone. */
+  .att-tile .mark {
+    flex:0 0 26px; height:26px; border-radius:50%;
+    border:2px solid #d1d5db; display:grid; place-items:center;
+    font-size:15px; line-height:1; color:transparent;
+  }
+  .att-tile[aria-pressed="true"] { background:#e6efe9; border-color:#2E6B4F;
+                                   color:#14432b; }
+  .att-tile[aria-pressed="true"] .mark { background:#2E6B4F; border-color:#2E6B4F;
+                                         color:#fff; }
+  .att-tile.saving { opacity:.55; }
+  .att-tile.failed { border-color:#B3261E; background:#fbeae8; }
+
+  .att-note { font-size:13px; color:#8a2020; margin:0 0 14px; }
+  .att-now { font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+             background:#111827; color:#fff; border-radius:4px; padding:3px 7px;
+             vertical-align:2px; }
+  /* Who is still unaccounted for, in the hour actually running. That is the
+     question asked mid-session, so it gets answered without any counting. */
+  .att-missing { font-size:14px; color:#7a3a12; background:#fdf1e3;
+                 border:1px solid #f0d3ae; border-radius:8px;
+                 padding:9px 12px; margin:0 0 12px; }
+  .att-link { background:none; border:none; padding:0; color:#2563eb;
+              cursor:pointer; text-decoration:underline; font-size:14px;
+              font-family:inherit; }
+  .att-empty { font-size:15px; color:#6b7280; }
+  @media (prefers-reduced-motion: reduce) {
+    .att-tile { transition:none; }
+    .att-tile:active { transform:none; }
+  }
+</style>
+
+<div class="att-head">
+  <h1>Attendance</h1>
+  <form method="POST" action="/attendance" class="att-date">
+    <input type="hidden" name="credential" value="{{ idToken }}">
+    <label for="on">Date</label>
+    <input type="date" id="on" name="on" value="{{ on }}" data-autosubmit>
+  </form>
+  <span class="att-count"><b>{{ marked }}</b> of {{ expected }} marked
+    · {{ on_label }}</span>
+</div>
+
+<form method="POST" action="/attendance/report" style="margin:-6px 0 16px;">
+  <input type="hidden" name="idToken" value="{{ idToken }}">
+  <button type="submit" class="att-link">See the attendance record →</button>
+</form>
+
+{% if error %}<p class="att-note">{{ error }}</p>{% endif %}
+
+{% if not is_session_day %}
+  <p class="att-empty">{{ day }} is not a class day, so there is no register for
+    {{ on_label }}. Pick another date above.</p>
+{% elif not hours %}
+  <p class="att-empty">No students are scheduled on {{ on_label }}.</p>
+{% else %}
+  {% for h in hours %}
+  <section class="att-hour"{% if h.is_now %} data-now="1"{% endif %}>
+    <div class="att-hour-bar">
+      <h2>{{ h.time }}{% if h.is_now %} <span class="att-now">now</span>{% endif %}</h2>
+      <span class="att-count"><b>{{ h.marked }}</b>/{{ h.total }}</span>
+    </div>
+    {% if h.is_now and h.missing %}
+    <p class="att-missing">Still to check in: <b>{{ h.missing | join(', ') }}</b></p>
+    {% endif %}
+    {% for r in h.rooms %}
+    <div class="att-room">
+      <p class="att-room-name">{{ r.label }}</p>
+      {% for g in r.groups %}
+      {% if g.teacher %}<p class="att-teacher">{{ g.teacher }}</p>{% endif %}
+      <div class="att-tiles">
+        {% for s in g.students %}
+        <button type="button" class="att-tile" aria-pressed="{{ 'true' if s.present else 'false' }}"
+                data-student="{{ s.name }}" data-time="{{ h.time }}"
+                data-subject="{{ r.room }}" data-teacher="{{ g.teacher }}">
+          <span class="mark" aria-hidden="true">✓</span>
+          <span>{{ s.name }}</span>
+        </button>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ nonce }}">
+  // A tap posts and flips the tile in place. Reloading the page between every
+  // child would make walking a room slower than a paper register.
+  (function () {
+    var token = {{ idToken | tojson }};
+    var on = {{ on | tojson }};
+    var day = {{ day | tojson }};
+
+    document.querySelectorAll('[data-autosubmit]').forEach(function (el) {
+      el.addEventListener('change', function () { el.form.submit(); });
+    });
+
+    function recount() {
+      document.querySelectorAll('.att-hour').forEach(function (sec) {
+        var tiles = sec.querySelectorAll('.att-tile');
+        var on_ = sec.querySelectorAll('.att-tile[aria-pressed="true"]').length;
+        var c = sec.querySelector('.att-hour-bar .att-count');
+        if (c) { c.innerHTML = '<b>' + on_ + '</b>/' + tiles.length; }
+      });
+      var all = document.querySelectorAll('.att-tile');
+      var marked = document.querySelectorAll('.att-tile[aria-pressed="true"]').length;
+      var top = document.querySelector('.att-head .att-count');
+      if (top) {
+        top.innerHTML = '<b>' + marked + '</b> of ' + all.length + ' marked · ' +
+                        {{ on_label | tojson }};
+      }
+    }
+
+    document.querySelectorAll('.att-tile').forEach(function (tile) {
+      tile.addEventListener('click', function () {
+        if (tile.classList.contains('saving')) { return; }
+        var wasPresent = tile.getAttribute('aria-pressed') === 'true';
+        var want = !wasPresent;
+        // Flip straight away so the tap feels instant, then put it back if the
+        // write fails -- a tile that lies about being saved is worse than a
+        // slow one.
+        tile.setAttribute('aria-pressed', want ? 'true' : 'false');
+        tile.classList.remove('failed');
+        tile.classList.add('saving');
+        recount();
+
+        var body = new URLSearchParams({
+          credential: token, on: on, day: day,
+          student: tile.dataset.student, time: tile.dataset.time,
+          subject: tile.dataset.subject, teacher: tile.dataset.teacher,
+          present: want ? '1' : '0'
+        });
+        fetch('/attendance/toggle', {
+          method: 'POST', body: body,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        }).then(function (r) {
+          return r.json().catch(function () { return { ok: false }; });
+        }).then(function (d) {
+          tile.classList.remove('saving');
+          if (!d.ok) {
+            tile.setAttribute('aria-pressed', wasPresent ? 'true' : 'false');
+            tile.classList.add('failed');
+            tile.title = d.signed_out ? 'Sign-in timed out — reload the page'
+                                      : 'Not saved — tap again';
+            recount();
+          }
+        }).catch(function () {
+          tile.classList.remove('saving');
+          tile.setAttribute('aria-pressed', wasPresent ? 'true' : 'false');
+          tile.classList.add('failed');
+          tile.title = 'Not saved — tap again';
+          recount();
+        });
+      });
+    });
+  })();
+</script>
+{% endblock %}

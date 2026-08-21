@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.templating import Jinja2Templates
 from googleapiclient.discovery import build
@@ -22,6 +23,7 @@ from typing import List, Dict, Any, Optional
 from schedule_service import ScheduleService
 from booklet_tracker import review_student
 from english_tracker import review_student as review_english
+import attendance_service as attendance
 
 # The centre's local clock. Cloud Run runs in UTC, so the handover window has
 # to be worked out in local time or it lands hours off.
@@ -1096,6 +1098,224 @@ def _time_key(t: str) -> tuple:
         return (0, datetime.strptime(t.strip(), "%I:%M %p").time())
     except ValueError:
         return (1, t)
+
+
+def _attendance_context(request: Request, form, teacher_email: str):
+    """
+    The day's roster, grouped for someone walking the rooms with a tablet.
+
+    Deliberately does NOT touch Classroom. The attendance page needs names and
+    nothing else, so it reads only the schedule Sheet -- which is cached -- and
+    loads in a fraction of the time the dashboard takes. Waiting three seconds
+    at each doorway would make the tool unusable for its actual purpose.
+    """
+    raw = (form.get("on") or "").strip()
+    try:
+        on = date.fromisoformat(raw) if raw else today_local()
+    except ValueError:
+        on = today_local()
+    day = on.strftime('%A')
+
+    ctx = {
+        "on": on.isoformat(),
+        "on_label": on.strftime('%a %b %-d'),
+        "day": day,
+        "is_session_day": day in ScheduleService.DAYS,
+        "hours": [],
+        "present": set(),
+        "marked": 0,
+        "expected": 0,
+        "teacher_email": teacher_email,
+        "idToken": form.get("credential") or form.get("idToken") or "",
+        "error": "",
+    }
+    if not ctx["is_session_day"]:
+        return ctx
+
+    schedule = get_day_schedule_cached(day)
+    entries = list(schedule["entries"])
+    # Make-ups sit in their own dated table, so a child making up a missed
+    # session only belongs to THIS date. They are folded into the same hours as
+    # the regular roster because the admin counting heads in a room needs one
+    # number, not two lists to add up.
+    for mu in schedule.get("makeups") or []:
+        if mu.get("date") != on:
+            continue
+        name = (mu.get("student_name") or "").strip()
+        if not name:
+            continue
+        entries.append({"time": mu.get("time") or '',
+                        "subject": mu.get("subject") or '',
+                        "teacher": MAKEUP_GROUP,
+                        "student_name": name})
+
+    try:
+        ctx["present"] = attendance.present_on(on.isoformat())
+    except Exception as e:
+        # The roster is still worth showing: an admin can mark from a page that
+        # could not read back what was already marked, and the marks will land.
+        ctx["error"] = f"Could not read what has already been marked ({type(e).__name__})."
+
+    # Grouped hour -> room -> teacher, which is the order the rooms are walked
+    # rather than the order the Sheet happens to list them in.
+    by_hour: Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]] = {}
+    for e in entries:
+        name = (e.get("student_name") or "").strip()
+        if not name:
+            continue
+        room = e.get("subject") or ""
+        (by_hour.setdefault(e.get("time") or "", {})
+               .setdefault(room, {})
+               .setdefault(e.get("teacher") or "", [])).append(name)
+
+    for hour in sorted(by_hour, key=_time_key):
+        rooms = []
+        for room in sorted(by_hour[hour]):
+            groups = []
+            for teacher, names in sorted(by_hour[hour][room].items()):
+                students = [{"name": n, "slug": attendance.slug(n),
+                             "present": attendance.slug(n) in ctx["present"]}
+                            for n in sorted(set(names))]
+                groups.append({"teacher": teacher, "students": students})
+                ctx["expected"] += len(students)
+                ctx["marked"] += sum(1 for s in students if s["present"])
+            rooms.append({"room": room, "label": ROOM_LABEL.get(room, room),
+                          "groups": groups})
+        by_room_total = sum(len(g["students"]) for r in rooms for g in r["groups"])
+        by_room_marked = sum(1 for r in rooms for g in r["groups"]
+                             for s in g["students"] if s["present"])
+        # Who is still unaccounted for in this hour -- the "who's missing right
+        # now" question, which is the one an admin asks mid-session.
+        missing = [s["name"] for r in rooms for g in r["groups"]
+                   for s in g["students"] if not s["present"]]
+        ctx["hours"].append({"time": hour, "rooms": rooms,
+                             "total": by_room_total, "marked": by_room_marked,
+                             "missing": missing,
+                             "is_now": _is_current_hour(hour, on)})
+    return ctx
+
+
+def _is_current_hour(session_time: str, on: date) -> bool:
+    """Whether this hour is the one running now, so it can lead the page."""
+    if on != today_local():
+        return False
+    try:
+        start = datetime.strptime(session_time.strip(), "%I:%M %p")
+    except (ValueError, AttributeError):
+        return False
+    return now_local().hour == start.hour
+
+
+@app.get("/attendance")
+async def attendance_entry(request: Request):
+    """Reached directly, so it starts at the sign-in prompt."""
+    return templates.TemplateResponse(request, "login.html", {
+        "google_client_id": GOOGLE_CLIENT_ID,
+        "login_action": "/attendance",
+    })
+
+
+@app.post("/attendance")
+async def attendance_page(request: Request):
+    form = await request.form()
+    try:
+        teacher_email = _verify_and_get_email(
+            form.get("credential") or form.get("idToken"))
+    except Exception as auth_err:
+        logger.info("Sign-in lapsed on attendance: %s", auth_err)
+        return templates.TemplateResponse(request, "login.html", {
+            "google_client_id": GOOGLE_CLIENT_ID,
+            "login_action": "/attendance",
+            "signed_out": True,
+        })
+    ctx = _attendance_context(request, form, teacher_email)
+    return templates.TemplateResponse(request, "attendance.html", ctx)
+
+
+@app.post("/attendance/report")
+async def attendance_report(request: Request):
+    """A child's record over a period, and the totals for everyone in it."""
+    form = await request.form()
+    try:
+        teacher_email = _verify_and_get_email(
+            form.get("credential") or form.get("idToken"))
+    except Exception as auth_err:
+        logger.info("Sign-in lapsed on the attendance report: %s", auth_err)
+        return templates.TemplateResponse(request, "login.html", {
+            "google_client_id": GOOGLE_CLIENT_ID,
+            "login_action": "/attendance", "signed_out": True,
+        })
+
+    today = today_local()
+    def _d(field, default):
+        try:
+            return date.fromisoformat((form.get(field) or '').strip())
+        except ValueError:
+            return default
+    # A month back by default: long enough to see a pattern, short enough that
+    # nobody waits for it.
+    frm = _d("from", today - timedelta(days=30))
+    to = _d("to", today)
+    if frm > to:
+        frm, to = to, frm
+
+    ctx = {"from": frm.isoformat(), "to": to.isoformat(),
+           "from_label": frm.strftime('%a %b %-d'),
+           "to_label": to.strftime('%a %b %-d'),
+           "idToken": form.get("credential") or form.get("idToken") or "",
+           "rows": [], "sessions": 0, "error": "",
+           "student": (form.get("student") or "").strip()}
+    try:
+        records = attendance.records_between(frm.isoformat(), to.isoformat())
+        if ctx["student"]:
+            want = attendance.slug(ctx["student"])
+            records = [r for r in records
+                       if attendance.slug(r.get('student') or '') == want]
+        ctx["rows"] = attendance.summarise(records)
+        ctx["sessions"] = len({r.get('date') for r in records if r.get('date')})
+    except Exception as e:
+        logger.error("Attendance report failed: %s", e, exc_info=True)
+        ctx["error"] = f"Could not read attendance ({type(e).__name__})."
+    return templates.TemplateResponse(request, "attendance_report.html", ctx)
+
+
+@app.post("/attendance/toggle")
+async def attendance_toggle(request: Request):
+    """
+    Mark or unmark one student, for the tap on the tablet.
+
+    Answers with JSON rather than a page so the tile flips immediately: a full
+    reload between every child would make walking a room slower than paper.
+    """
+    form = await request.form()
+    try:
+        teacher_email = _verify_and_get_email(
+            form.get("credential") or form.get("idToken"))
+    except Exception as auth_err:
+        return JSONResponse({"ok": False, "signed_out": True,
+                             "error": "Sign-in has timed out."}, status_code=401)
+
+    student = (form.get("student") or "").strip()
+    on = (form.get("on") or "").strip()
+    want_present = (form.get("present") or "") == "1"
+    if not student or not on:
+        return JSONResponse({"ok": False, "error": "Missing student or date."},
+                            status_code=400)
+    try:
+        if want_present:
+            attendance.mark_present(
+                on, student, session_day=form.get("day") or '',
+                subject=form.get("subject") or '', time=form.get("time") or '',
+                teacher=form.get("teacher") or '', marked_by=teacher_email)
+        else:
+            attendance.clear(on, student)
+    except Exception as e:
+        logger.error("Attendance write failed for %r on %s: %s", student, on, e,
+                     exc_info=True)
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}"},
+                            status_code=500)
+    return JSONResponse({"ok": True, "present": want_present,
+                         "student": student})
 
 
 @app.post("/dashboard")
