@@ -24,6 +24,7 @@ from schedule_service import ScheduleService
 from booklet_tracker import review_student
 from english_tracker import review_student as review_english
 import attendance_service as attendance
+import email_service
 
 # The centre's local clock. Cloud Run runs in UTC, so the handover window has
 # to be worked out in local time or it lands hours off.
@@ -1321,6 +1322,145 @@ async def attendance_page(request: Request):
         })
     ctx = _attendance_context(request, form, teacher_email)
     return templates.TemplateResponse(request, "attendance.html", ctx)
+
+
+DIGEST_SENDER = os.environ.get("DIGEST_SENDER", "admin@enopieastcobb.com")
+DIGEST_TO = os.environ.get("DIGEST_TO", "info@enopieastcobb.com")
+# Cloud Run already refuses anyone who is not an authorised invoker, so this is
+# a second lock rather than the only one: it stops a mis-scheduled or replayed
+# request sending mail, and makes the endpoint safe to leave in place.
+DIGEST_TOKEN = os.environ.get("DIGEST_TOKEN", "")
+
+
+def _digest_sections(on: date, teacher_email: str):
+    """
+    Every outstanding booklet finding for a date, across all rooms and hours.
+
+    More complete than any single banner view: the dashboard shows one room and
+    hour at a time, so a problem can hide behind a dropdown nobody opened. This
+    walks all of them.
+
+    Each student's Classroom data is loaded ONCE for the whole day, not once per
+    session. A child in 4pm English and 5pm Maths would otherwise be fetched
+    twice, and fetching is nearly all of the time this takes.
+    """
+    roster = _roster_for(on)
+    if not roster:
+        return [], 0
+
+    classroom_svc = ClassroomService(teacher_email)
+    courses_key = ('courses', teacher_email)
+    courses = _CACHE.get(courses_key)
+    if courses is None:
+        courses = classroom_svc.list_teacher_courses()
+        _CACHE.put(courses_key, courses, _COURSES_TTL)
+
+    # name -> (items, grade), fetched once each.
+    loaded: Dict[str, Any] = {}
+
+    def _load(name: str):
+        if name in loaded:
+            return loaded[name]
+        course = find_course_for_student(courses, name)
+        if not course:
+            loaded[name] = None
+            return None
+        try:
+            items, _ = classroom_svc.load_student(course["id"])
+        except Exception as e:
+            logger.error("Digest could not load %r: %s", name, e)
+            loaded[name] = None
+            return None
+        grade = ((course.get("section") or "").strip()
+                 or split_course_name(course.get("name", "")).get("grade", ""))
+        DataProcessor.mark_superseded_pods(items)
+        loaded[name] = (items, grade)
+        return loaded[name]
+
+    by_slot: Dict[Any, List[Dict[str, str]]] = {}
+    for e in roster:
+        by_slot.setdefault((e["time"], e["room"]), []).append(e)
+
+    sections, checked = [], 0
+    for (hour, room) in sorted(by_slot, key=lambda k: (_time_key(k[0]), k[1])):
+        checker = {"Math": review_student, "English": review_english}.get(room)
+        if checker is None:
+            # Help sessions and rooms with no booklet curriculum of their own.
+            continue
+        checked += 1
+        items_out = []
+        for e in sorted(by_slot[(hour, room)], key=lambda x: x["name"]):
+            got = _load(e["name"])
+            if not got:
+                continue
+            student_items, grade = got
+            try:
+                found = checker(student_items, on, grade)
+            except Exception as ex:
+                logger.error("Digest check failed for %r: %s", e["name"], ex,
+                             exc_info=True)
+                continue
+            severe = set(found.get("severe") or [])
+            for booklet in found.get("missing") or []:
+                items_out.append({"student": e["name"],
+                                  "detail": f"did not receive {booklet}",
+                                  "severe": False})
+            for note in found.get("notes") or []:
+                items_out.append({"student": e["name"], "detail": note,
+                                  "severe": note in severe})
+        if items_out:
+            sections.append({"time": hour,
+                             "room": ROOM_LABEL.get(room, room),
+                             "items": items_out})
+    return sections, checked
+
+
+@app.post("/digest")
+async def digest(request: Request):
+    """
+    Emails everything still outstanding for a date. Driven by Cloud Scheduler.
+
+    Runs after the last session of the day, so every hour has finished and
+    nothing in it is merely "not handed over yet".
+    """
+    # Checked from the header BEFORE the body is read: an unauthorised caller
+    # should not get its payload parsed, and this way the gate can be tested
+    # without a form parser present.
+    supplied = request.headers.get("X-Digest-Token") or ""
+    if not DIGEST_TOKEN or not secrets.compare_digest(supplied, DIGEST_TOKEN):
+        logger.warning("Digest called without a valid token.")
+        return JSONResponse({"ok": False, "error": "not authorised"},
+                            status_code=403)
+
+    form = await request.form()
+    raw = (form.get("on") or "").strip()
+    try:
+        on = date.fromisoformat(raw) if raw else today_local()
+    except ValueError:
+        on = today_local()
+
+    try:
+        sections, checked = _digest_sections(on, DIGEST_SENDER)
+        creds = get_scoped_creds(email_service.GMAIL_SCOPES,
+                                 subject=DIGEST_SENDER)
+        outstanding = sum(len(s["items"]) for s in sections)
+        subject = (f"Booklets outstanding — {on.strftime('%a %b %-d')}"
+                   if outstanding else
+                   f"Nothing outstanding — {on.strftime('%a %b %-d')}")
+        msg_id = email_service.send_digest(
+            creds, sender=DIGEST_SENDER, to=DIGEST_TO, subject=subject,
+            sections=sections, date_label=on.strftime('%a %b %-d'),
+            checked=checked)
+    except Exception as e:
+        logger.error("Digest failed for %s: %s", on, e, exc_info=True)
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},
+                            status_code=500)
+
+    logger.info("DIGEST SENT for %s: %d findings across %d sessions",
+                on, outstanding, checked)
+    return JSONResponse({"ok": True, "date": on.isoformat(),
+                         "findings": outstanding, "sessions": checked,
+                         "message_id": msg_id})
 
 
 @app.post("/attendance/walkin")
